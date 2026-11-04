@@ -2,13 +2,18 @@
 # macOS Finder 双击一键还原 Antigravity 官方英文原版
 cd "$(dirname "$0")"
 
+CORE_DIR="."
+if [ -f "core/localize.js" ]; then
+  CORE_DIR="core"
+fi
+
 echo "======================================================="
 echo "  Antigravity-ZH-CN 一键还原英文原版 (macOS)"
 echo "======================================================="
 echo ""
 
 if command -v node >/dev/null 2>&1; then
-  node localize.js --restore
+  node "$CORE_DIR/localize.js" --restore
   EXIT_CODE=$?
 elif [ -f "/Applications/Antigravity.app/Contents/Resources/app.asar.bak" ]; then
   echo "[提示] 正在从安全备份 (app.asar.bak) 恢复官方英文原版..."

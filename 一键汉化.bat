@@ -3,6 +3,9 @@ chcp 65001 >nul
 cd /d "%~dp0"
 title Antigravity-ZH-CN 一键极速汉化 (Windows)
 
+set "CORE_DIR=."
+if exist "core\localize.js" set "CORE_DIR=core"
+
 echo =======================================================
 echo   Antigravity-ZH-CN 一键极速汉化 (Windows)
 echo =======================================================
@@ -10,7 +13,7 @@ echo.
 
 where node >nul 2>nul
 if %ERRORLEVEL% equ 0 (
-    node localize.js --now
+    node "%CORE_DIR%\localize.js" --now
     if %ERRORLEVEL% equ 0 (
         echo.
         echo 🎉 汉化已完成！正在启动 Antigravity...
@@ -26,17 +29,16 @@ if %ERRORLEVEL% equ 0 (
     exit /b
 )
 
-echo [提示] 未检测到 Node.js，正在尝试使用内置免环境汉化包 (app.asar.ready)...
+echo [提示] 未检测到 Node.js，正在使用内置免环境汉化包直接部署...
 set "TARGET_DIR=%LOCALAPPDATA%\Programs\antigravity\resources"
 if not exist "%TARGET_DIR%\app.asar" (
     echo [错误] 未在默认路径找到 Antigravity: %TARGET_DIR%
-    echo 请安装 Node.js ^(https://nodejs.org^) 后重试，或手动将 app.asar.ready 复制为 resources\app.asar。
     echo.
     pause
     exit /b 1
 )
 
-if not exist "app.asar.ready" (
+if not exist "%CORE_DIR%\app.asar.ready" (
     echo [错误] 未找到内置免环境汉化包 app.asar.ready。
     echo.
     pause
@@ -51,7 +53,7 @@ if not exist "%TARGET_DIR%\app.asar.bak" (
     echo [安全备份] 已备份原版文件至 %TARGET_DIR%\app.asar.bak
 )
 
-copy /Y "app.asar.ready" "%TARGET_DIR%\app.asar" >nul
+copy /Y "%CORE_DIR%\app.asar.ready" "%TARGET_DIR%\app.asar" >nul
 if %ERRORLEVEL% equ 0 (
     echo.
     echo 🎉 免环境一键汉化成功！正在启动 Antigravity...

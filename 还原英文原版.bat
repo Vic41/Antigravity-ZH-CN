@@ -3,6 +3,9 @@ chcp 65001 >nul
 cd /d "%~dp0"
 title Antigravity-ZH-CN 一键还原英文原版 (Windows)
 
+set "CORE_DIR=."
+if exist "core\localize.js" set "CORE_DIR=core"
+
 echo =======================================================
 echo   Antigravity-ZH-CN 一键还原英文原版 (Windows)
 echo =======================================================
@@ -10,7 +13,7 @@ echo.
 
 where node >nul 2>nul
 if %ERRORLEVEL% equ 0 (
-    node localize.js --restore
+    node "%CORE_DIR%\localize.js" --restore
     echo.
     pause
     exit /b

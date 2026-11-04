@@ -30,9 +30,9 @@ jobs:
           WIN_PKG="Antigravity-ZH-CN-${VERSION}-Windows"
 
           rm -rf release-assets
-          mkdir -p "release-assets/${MAC_PKG}" "release-assets/${WIN_PKG}"
+          mkdir -p "release-assets/${MAC_PKG}/core" "release-assets/${WIN_PKG}/core"
 
-          # 1. 组装 macOS 专用包（仅含 macOS 双击脚本，清爽无干扰）
+          # 1. 组装 macOS 完整汉化包（外层仅放双击按钮，底层核心文件收进 core/ 目录，小白打开一目了然）
           cp \
             localize.js \
             asar-tool.js \
@@ -40,15 +40,16 @@ jobs:
             auto-restore.js \
             process-check.js \
             package.json \
-            README.md \
             app.asar.ready \
+            "release-assets/${MAC_PKG}/core/"
+          cp \
             "一键汉化.command" \
             "还原英文原版.command" \
-            "运行汉化.sh" \
+            README.md \
             "release-assets/${MAC_PKG}/"
-          chmod +x "release-assets/${MAC_PKG}/"*.command "release-assets/${MAC_PKG}/"*.sh
+          chmod +x "release-assets/${MAC_PKG}/"*.command
 
-          # 2. 组装 Windows 专用包（仅含 Windows 双击脚本，清爽无干扰）
+          # 2. 组装 Windows 完整汉化包（外层仅放双击按钮，底层核心文件收进 core/ 目录，小白打开一目了然）
           cp \
             localize.js \
             asar-tool.js \
@@ -56,10 +57,12 @@ jobs:
             auto-restore.js \
             process-check.js \
             package.json \
-            README.md \
             app.asar.ready \
+            "release-assets/${WIN_PKG}/core/"
+          cp \
             "一键汉化.bat" \
             "还原英文原版.bat" \
+            README.md \
             "release-assets/${WIN_PKG}/"
 
           cd release-assets
@@ -75,21 +78,14 @@ jobs:
           prerelease: false
           make_latest: "true"
           body: |
-            ### 📥 请根据您的电脑系统下载对应的汉化包（在下方 Assets 中点击下载）
+            ### 📥 小白一键汉化下载指南（请根据您的电脑系统点击下方对应压缩包下载）
 
-            | 操作系统 | 下载文件名 | 使用方法 |
+            | 您的电脑系统 | 第 1 步：点击下方 Assets 下载 | 第 2 步：解压后直接双击 |
             | :--- | :--- | :--- |
-            | 🍎 **macOS (苹果电脑)** | **`Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-macOS.zip`** | 解压后双击 **`一键汉化.command`** 即可自动备份、汉化并重启（双击 `还原英文原版.command` 可恢复英文） |
-            | 🪟 **Windows (Win10/11)** | **`Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-Windows.zip`** | 解压后双击 **`一键汉化.bat`** 即可完成汉化（双击 `还原英文原版.bat` 可恢复英文） |
+            | 🍎 **苹果电脑 (macOS)** | **`Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-macOS.zip`** | 解压后双击 **`一键汉化.command`** 即可全自动完成汉化并重启 |
+            | 🪟 **Windows 电脑** | **`Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-Windows.zip`** | 解压后双击 **`一键汉化.bat`** 即可全自动完成汉化并重启 |
 
-            > 💡 **提示**：请直接下载上方表格对应的 `-macOS.zip` 或 `-Windows.zip` 压缩包，无需下载底部的 `Source code`。
-
-            ---
-
-            ### ✨ 版本特性（${{ steps.pkg.outputs.version }} · 适配官方客户端 v2.28.2）
-            - **全界面深度汉化**：覆盖顶部原生菜单、Dock 菜单、右键菜单、设置中心、欢迎向导、通行密钥弹窗及 Agent 对话主界面。
-            - **突破沙盒限制**：内联自包含 `DOM_TRANSLATOR_INJECTION` 引擎与 React 碎片拼接器，解决 Electron `sandbox: true` 下仅菜单汉化、主界面仍为英文的问题。
-            - **支持免 Node.js 环境直装**：内置预构建 `app.asar.ready` 汉化包，无论电脑是否安装 Node.js 均可双击一键完成。
+            > 💡 **提示**：每个压缩包内均已包含完整的中文汉化包与自动安装引擎，下载解压后**直接双击 `一键汉化`** 即可，无需安装任何编程环境！如需恢复英文，双击文件夹内的 `还原英文原版` 即可。
           files: |
             release-assets/Antigravity-ZH-CN-*-macOS.zip
             release-assets/Antigravity-ZH-CN-*-Windows.zip
