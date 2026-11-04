@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
   workflow_dispatch:
+
+concurrency:
+  group: release-publish
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -68,6 +70,7 @@ jobs:
           cd release-assets
           zip -rq "${MAC_PKG}.zip" "${MAC_PKG}"
           zip -rq "${WIN_PKG}.zip" "${WIN_PKG}"
+          ls -lh "${MAC_PKG}.zip" "${WIN_PKG}.zip"
 
       - name: Publish GitHub Release with Platform Packages
         uses: softprops/action-gh-release@v2
@@ -87,5 +90,5 @@ jobs:
 
             > 💡 **提示**：每个压缩包内均已包含完整的中文汉化包与自动安装引擎，下载解压后**直接双击 `一键汉化`** 即可，无需安装任何编程环境！如需恢复英文，双击文件夹内的 `还原英文原版` 即可。
           files: |
-            release-assets/Antigravity-ZH-CN-*-macOS.zip
-            release-assets/Antigravity-ZH-CN-*-Windows.zip
+            release-assets/Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-macOS.zip
+            release-assets/Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-Windows.zip
