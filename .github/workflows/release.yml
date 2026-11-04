@@ -2,6 +2,8 @@ name: Build & Publish Release Assets
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -18,11 +20,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Separate macOS & Windows ZIP Packages
+        id: pkg
         run: |
-          VERSION="${GITHUB_REF_NAME:-v0.0.1}"
+          RAW_VER=$(node -p "require('./package.json').version")
+          VERSION="v${RAW_VER#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
           MAC_PKG="Antigravity-ZH-CN-${VERSION}-macOS"
           WIN_PKG="Antigravity-ZH-CN-${VERSION}-Windows"
 
+          rm -rf release-assets
           mkdir -p "release-assets/${MAC_PKG}" "release-assets/${WIN_PKG}"
 
           # 1. 组装 macOS 专用包（仅含 macOS 双击脚本，清爽无干扰）
@@ -56,27 +63,30 @@ jobs:
             "release-assets/${WIN_PKG}/"
 
           cd release-assets
-          zip -r "${MAC_PKG}.zip" "${MAC_PKG}"
-          zip -r "${WIN_PKG}.zip" "${WIN_PKG}"
+          zip -rq "${MAC_PKG}.zip" "${MAC_PKG}"
+          zip -rq "${WIN_PKG}.zip" "${WIN_PKG}"
 
       - name: Publish GitHub Release with Platform Packages
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: "${{ github.ref_name }} - Antigravity 一键深度汉化包（适配官方 v2.28.2）"
+          tag_name: ${{ steps.pkg.outputs.version }}
+          name: "${{ steps.pkg.outputs.version }} - Antigravity 一键深度汉化包（适配官方 v2.28.2）"
+          draft: false
+          prerelease: false
+          make_latest: "true"
           body: |
             ### 📥 请根据您的电脑系统下载对应的汉化包（在下方 Assets 中点击下载）
 
             | 操作系统 | 下载文件名 | 使用方法 |
             | :--- | :--- | :--- |
-            | 🍎 **macOS (苹果电脑)** | **`Antigravity-ZH-CN-${{ github.ref_name }}-macOS.zip`** | 解压后双击 **`一键汉化.command`** 即可自动备份、汉化并重启（双击 `还原英文原版.command` 可恢复英文） |
-            | 🪟 **Windows (Win10/11)** | **`Antigravity-ZH-CN-${{ github.ref_name }}-Windows.zip`** | 解压后双击 **`一键汉化.bat`** 即可完成汉化（双击 `还原英文原版.bat` 可恢复英文） |
+            | 🍎 **macOS (苹果电脑)** | **`Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-macOS.zip`** | 解压后双击 **`一键汉化.command`** 即可自动备份、汉化并重启（双击 `还原英文原版.command` 可恢复英文） |
+            | 🪟 **Windows (Win10/11)** | **`Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-Windows.zip`** | 解压后双击 **`一键汉化.bat`** 即可完成汉化（双击 `还原英文原版.bat` 可恢复英文） |
 
             > 💡 **提示**：请直接下载上方表格对应的 `-macOS.zip` 或 `-Windows.zip` 压缩包，无需下载底部的 `Source code`。
 
             ---
 
-            ### ✨ 版本特性（${{ github.ref_name }} · 适配官方客户端 v2.28.2）
+            ### ✨ 版本特性（${{ steps.pkg.outputs.version }} · 适配官方客户端 v2.28.2）
             - **全界面深度汉化**：覆盖顶部原生菜单、Dock 菜单、右键菜单、设置中心、欢迎向导、通行密钥弹窗及 Agent 对话主界面。
             - **突破沙盒限制**：内联自包含 `DOM_TRANSLATOR_INJECTION` 引擎与 React 碎片拼接器，解决 Electron `sandbox: true` 下仅菜单汉化、主界面仍为英文的问题。
             - **支持免 Node.js 环境直装**：内置预构建 `app.asar.ready` 汉化包，无论电脑是否安装 Node.js 均可双击一键完成。
