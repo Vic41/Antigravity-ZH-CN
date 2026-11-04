@@ -149,6 +149,10 @@ jobs:
           MAC_ZIP="release-assets/Antigravity-ZH-CN-${TAG}-macOS.zip"
           WIN_ZIP="release-assets/Antigravity-ZH-CN-${TAG}-Windows.zip"
 
+          for old_id in $(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq '.[] | select(.draft == true or .tag_name == "v0.0.1") | .id' 2>/dev/null); do
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${old_id}" >/dev/null 2>&1 || true
+          done
+
           cat <<EOF > release-notes.md
           ### 📥 小白一键汉化下载指南（请根据您的电脑系统点击下方对应压缩包下载）
 
