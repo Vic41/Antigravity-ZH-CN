@@ -15,8 +15,52 @@ permissions:
   contents: write
 
 jobs:
+  verify-windows:
+    name: Smoke Test Windows Package (cmd.exe & Node)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          git init .
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "${GITHUB_SHA}"
+          git checkout -f FETCH_HEAD
+
+      - name: Verify JS syntax and Windows batch scripts in cmd.exe
+        shell: cmd
+        run: |
+          node --check localize.js || exit /b 1
+          node --check asar-tool.js || exit /b 1
+          node --check asar-version.js || exit /b 1
+          node --check auto-restore.js || exit /b 1
+          node --check process-check.js || exit /b 1
+
+          node -e "const fs=require('fs'),path=require('path'),{packAsar}=require('./asar-tool'),ver=require('./asar-version').readAsarPackageVersion('./app.asar.ready'); fs.writeFileSync('READY_VERSION',ver+'\r\n'); const d='win-mock-src'; fs.mkdirSync(path.join(d,'dist','ideInstall'),{recursive:true}); fs.writeFileSync(path.join(d,'package.json'),JSON.stringify({name:'antigravity',version:ver})); fs.writeFileSync(path.join(d,'dist','preload.js'),'// clean\n'); fs.writeFileSync(path.join(d,'dist','menu.js'),'electron_1.Menu.setApplicationMenu(menu);\n'); fs.writeFileSync(path.join(d,'dist','tray.js'),'contextMenu = electron_1.Menu.buildFromTemplate(actions);\n'); fs.writeFileSync(path.join(d,'dist','ideInstall','wizardPreload.js'),'// wizard\n'); fs.mkdirSync(path.join('win-mock-app','resources'),{recursive:true}); packAsar(d,path.join('win-mock-app','resources','app.asar'));" || exit /b 1
+
+          set "AGY_BATCH_NOPAUSE=1"
+          set "AGY_FORCE_NO_NODE=1"
+          set "AGY_WIN_RESOURCES_DIR=%CD%\win-mock-app\resources"
+
+          call "一键汉化.bat" || exit /b 1
+          if not exist "win-mock-app\resources\app.asar.bak" exit /b 1
+          node -e "if(!require('./auto-restore').isLocalizedAsar('win-mock-app/resources/app.asar')) process.exit(1);" || exit /b 1
+
+          call "一键还原.bat" || exit /b 1
+          node -e "if(require('./auto-restore').isLocalizedAsar('win-mock-app/resources/app.asar')) process.exit(1);" || exit /b 1
+
+          set "AGY_FORCE_NO_NODE=0"
+          set "AGY_APP_DIR=%CD%\win-mock-app"
+          node localize.js --now --no-kill || exit /b 1
+          node -e "if(!require('./auto-restore').isLocalizedAsar('win-mock-app/resources/app.asar')) process.exit(1);" || exit /b 1
+          node localize.js --restore --no-kill || exit /b 1
+          node -e "if(require('./auto-restore').isLocalizedAsar('win-mock-app/resources/app.asar')) process.exit(1);" || exit /b 1
+
   release:
     name: Package macOS & Windows Release ZIPs
+    needs: [verify-windows]
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
@@ -114,15 +158,6 @@ jobs:
           | 🪟 **Windows 电脑** | **\`Antigravity-ZH-CN-${TAG}-Windows.zip\`** | 双击 **\`一键汉化.bat\`** 完成汉化；双击 **\`一键还原.bat\`** 恢复默认英文 |
 
           > 💡 **提示**：每个压缩包内均已包含完整的中文汉化包（适配官方 \`${AGY_VER}\`）与自动安装脚本，下载解压后直接双击 **\`一键汉化\`** 或 **\`一键还原\`** 即可！
-
-          ---
-
-          ### ✨ 本次更新内容
-
-          - **修复选项点击失效问题**：解决部分下拉选项与设置项在汉化后无法正常切换的问题。
-          - **提升长时间使用流畅度**：优化翻译缓存机制，消除长时间对话后偶发的界面卡顿。
-          - **增强安装与还原稳定性**：确保软件完全退出并校验文件完整后再替换，避免安装中断导致软件打不开。
-          - **新增版本匹配安全保护**：自动检测软件版本与备份状态，防止官方软件升级后误覆盖导致白屏。
           EOF
           sed -i 's/^          //' release-notes.md
 
