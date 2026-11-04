@@ -50,7 +50,7 @@
 1. 打开解压后的文件夹，直接双击 **`一键汉化.command`**。
    - 脚本会自动完成：**安全备份原版 ➔ 注入中文语言包 ➔ 清除签名缓存 ➔ 自动重启 Antigravity**。
    - 若电脑已安装 Node.js，将实时解包当前客户端并注入汉化；若未安装 Node.js，将自动使用内置的 `app.asar.ready` 免环境直装。
-2. 如需恢复英文原版，直接双击 **`还原英文原版.command`** 即可。
+2. 如需恢复默认英文原版，直接双击 **`一键还原.command`** 即可。
 
 > **💡 macOS 首次双击提示“无法打开 / 未受信任的开发者”怎么办？**
 > 在访达（Finder）中对该 `.command` 文件 **按住 `Control` 键并点击右键 ➔ 选择“打开”**，在弹出框中再次点击“打开”即可。或者在终端运行：
@@ -64,7 +64,7 @@
 
 1. 打开解压后的文件夹，直接双击 **`一键汉化.bat`**。
    - 若电脑已安装 Node.js，将自动解包并注入汉化；若未安装 Node.js，将自动把内置的 `app.asar.ready` 覆盖到 `%LOCALAPPDATA%\Programs\antigravity\resources\app.asar`（并自动创建 `app.asar.bak` 备份）。
-2. 如需恢复英文原版，直接双击 **`还原英文原版.bat`** 即可。
+2. 如需恢复默认英文原版，直接双击 **`一键还原.bat`** 即可。
 
 ---
 
@@ -106,8 +106,8 @@ node localize.js --check-status
 | [`asar-version.js`](./asar-version.js) | 从 `app.asar` 头部安全读取客户端 `package.json` 版本号 |
 | [`process-check.js`](./process-check.js) | 跨平台（macOS / Windows / Linux）进程占用检测工具 |
 | [`app.asar.ready`](./app.asar.ready) | 预构建就绪的完整汉化包（供无 Node.js 环境用户直接覆盖安装） |
-| [`一键汉化.command`](./一键汉化.command) / [`还原英文原版.command`](./还原英文原版.command) | macOS 双击一键汉化 / 还原脚本 |
-| [`一键汉化.bat`](./一键汉化.bat) / [`还原英文原版.bat`](./还原英文原版.bat) | Windows 双击一键汉化 / 还原脚本 |
+| [`一键汉化.command`](./一键汉化.command) / [`一键还原.command`](./一键还原.command) | macOS 双击一键汉化 / 一键还原脚本 |
+| [`一键汉化.bat`](./一键汉化.bat) / [`一键还原.bat`](./一键还原.bat) | Windows 双击一键汉化 / 一键还原脚本 |
 
 ---
 

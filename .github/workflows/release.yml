@@ -46,7 +46,7 @@ jobs:
             "release-assets/${MAC_PKG}/core/"
           cp \
             "一键汉化.command" \
-            "还原英文原版.command" \
+            "一键还原.command" \
             README.md \
             "release-assets/${MAC_PKG}/"
           chmod +x "release-assets/${MAC_PKG}/"*.command
@@ -63,7 +63,7 @@ jobs:
             "release-assets/${WIN_PKG}/core/"
           cp \
             "一键汉化.bat" \
-            "还原英文原版.bat" \
+            "一键还原.bat" \
             README.md \
             "release-assets/${WIN_PKG}/"
 
@@ -85,10 +85,10 @@ jobs:
 
             | 您的电脑系统 | 第 1 步：点击下方 Assets 下载 | 第 2 步：解压后直接双击 |
             | :--- | :--- | :--- |
-            | 🍎 **苹果电脑 (macOS)** | **`Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-macOS.zip`** | 解压后双击 **`一键汉化.command`** 即可全自动完成汉化并重启 |
-            | 🪟 **Windows 电脑** | **`Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-Windows.zip`** | 解压后双击 **`一键汉化.bat`** 即可全自动完成汉化并重启 |
+            | 🍎 **苹果电脑 (macOS)** | **`Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-macOS.zip`** | 双击 **`一键汉化.command`** 完成汉化；双击 **`一键还原.command`** 恢复默认英文 |
+            | 🪟 **Windows 电脑** | **`Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-Windows.zip`** | 双击 **`一键汉化.bat`** 完成汉化；双击 **`一键还原.bat`** 恢复默认英文 |
 
-            > 💡 **提示**：每个压缩包内均已包含完整的中文汉化包与自动安装引擎，下载解压后**直接双击 `一键汉化`** 即可，无需安装任何编程环境！如需恢复英文，双击文件夹内的 `还原英文原版` 即可。
+            > 💡 **提示**：每个压缩包内均已包含完整的中文汉化包与自动安装引擎，下载解压后直接双击 **`一键汉化`** 或 **`一键还原`** 即可，无需安装任何编程环境！
           files: |
             release-assets/Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-macOS.zip
             release-assets/Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-Windows.zip
