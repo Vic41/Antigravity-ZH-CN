@@ -1,9 +1,10 @@
 name: Build & Publish Release Assets
 
 on:
+  # 仅在推送版本标签（如 v0.0.2）时发布，避免每次推送 main 都覆盖已发布版本的安装包
   push:
-    branches:
-      - main
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 concurrency:
@@ -32,7 +33,15 @@ jobs:
         run: |
           RAW_VER=$(node -p "require('./package.json').version")
           VERSION="v${RAW_VER#v}"
-          AGY_VER=$(node -p "require('./asar-version').readAsarPackageVersion('./app.asar.ready') || '2.28.2'")
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "${VERSION}" ]; then
+            echo "::error::推送的标签 ${GITHUB_REF_NAME} 与 package.json 版本 ${VERSION} 不一致，请先同步版本号再打标签。"
+            exit 1
+          fi
+          AGY_VER=$(node -p "require('./asar-version').readAsarPackageVersion('./app.asar.ready') || ''")
+          if [ -z "${AGY_VER}" ]; then
+            echo "::error::无法读取 app.asar.ready 的客户端版本号，预打包汉化文件可能已损坏。"
+            exit 1
+          fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "agy_version=v${AGY_VER#v}" >> "$GITHUB_OUTPUT"
 
@@ -59,6 +68,8 @@ jobs:
             LICENSE \
             "release-assets/${MAC_PKG}/"
           chmod +x "release-assets/${MAC_PKG}/"*.command
+          # 免 Node 模式据此校验客户端版本与内置汉化包是否一致
+          printf '%s\n' "${AGY_VER#v}" > "release-assets/${MAC_PKG}/core/READY_VERSION"
 
           # 2. 组装 Windows 完整汉化包（外层仅放双击按钮，底层核心文件收进 core/ 目录，小白打开一目了然）
           cp \
@@ -77,6 +88,7 @@ jobs:
             LICENSE \
             "release-assets/${WIN_PKG}/"
           sed -i 's/\r$//; s/$/\r/' "release-assets/${WIN_PKG}/"*.bat
+          printf '%s\r\n' "${AGY_VER#v}" > "release-assets/${WIN_PKG}/core/READY_VERSION"
 
           cd release-assets
           zip -rq "${MAC_PKG}.zip" "${MAC_PKG}"
@@ -111,13 +123,19 @@ jobs:
               --title "${TITLE}" \
               --notes-file release-notes.md \
               --latest
+            UPLOADED=0
             for attempt in 1 2 3; do
               if gh release upload "${TAG}" "${MAC_ZIP}" "${WIN_ZIP}" --clobber --repo "${GITHUB_REPOSITORY}"; then
+                UPLOADED=1
                 break
               fi
               echo "Upload attempt ${attempt} failed, retrying in 3s..."
               sleep 3
             done
+            if [ "${UPLOADED}" != "1" ]; then
+              echo "::error::Release 附件上传连续 3 次失败。"
+              exit 1
+            fi
           else
             gh release create "${TAG}" "${MAC_ZIP}" "${WIN_ZIP}" \
               --repo "${GITHUB_REPOSITORY}" \

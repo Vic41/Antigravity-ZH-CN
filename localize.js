@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const { isAppRunningStrict } = require('./process-check');
 const { readAsarPackageVersion } = require('./asar-version');
@@ -13,7 +14,7 @@ const {
   findAvailablePatch
 } = require('./auto-restore');
 
-const CURRENT_VERSION = '0.0.1';
+const CURRENT_VERSION = '0.0.2';
 const TARGET_AGY_VERSION = '2.28.2';
 const WORKSPACE_DIR = __dirname;
 const EXTRACT_DIR = path.join(WORKSPACE_DIR, 'extracted');
@@ -38,6 +39,84 @@ function getHostUsername() {
     if (info && info.username) return info.username;
   } catch (_) {}
   return process.env.USER || process.env.USERNAME || 'user';
+}
+
+// 解析用户主目录：当前用户直接用 os.homedir()（兼容非 C 盘、改名或域账户的用户目录），
+// 指定其他用户名时按当前主目录的同级目录推算
+function getUserHomeDir(user) {
+  const hostUser = getHostUsername();
+  if (!user || user === hostUser) return os.homedir();
+  return path.join(path.dirname(os.homedir()), user);
+}
+
+// 同步休眠（不占用 CPU），用于等待进程退出与文件锁释放
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// 等待 Antigravity 进程退出：返回 true 表示已退出，false 表示超时仍在运行，null 表示无法检测
+function waitForAppExit(timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    let running;
+    try {
+      running = isAppRunningStrict();
+    } catch (_) {
+      return null;
+    }
+    if (!running) return true;
+    if (Date.now() >= deadline) return false;
+    sleepSync(200);
+  }
+}
+
+function stopAppAndWait() {
+  killApp();
+  const exited = waitForAppExit();
+  if (exited === false) {
+    log('警告：Antigravity 相关进程仍未退出，文件可能仍被占用；如后续替换失败，请手动退出客户端后重试。');
+  } else if (exited === null) {
+    log('提示：无法检测进程状态，将直接尝试替换文件。');
+  }
+}
+
+function sha256File(filePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+// 原子替换：先复制到目标同目录的暂存文件并校验哈希，再重命名覆盖目标。
+// 中途失败时目标文件保持原样，不会出现写了一半的损坏 app.asar。
+function atomicReplaceFile(srcPath, destPath) {
+  const stagePath = path.join(
+    path.dirname(destPath),
+    `.${path.basename(destPath)}.${process.pid}-${Date.now()}.stage`
+  );
+  try {
+    fs.copyFileSync(srcPath, stagePath);
+    if (sha256File(srcPath) !== sha256File(stagePath)) {
+      throw new Error('暂存文件写入校验失败，SHA256 不一致');
+    }
+    for (let attempt = 1; ; attempt++) {
+      try {
+        fs.renameSync(stagePath, destPath);
+        break;
+      } catch (e) {
+        if (attempt >= 5 || !['EBUSY', 'EPERM', 'EACCES'].includes(e.code)) throw e;
+        sleepSync(300 * attempt);
+      }
+    }
+  } catch (e) {
+    try { if (fs.existsSync(stagePath)) fs.unlinkSync(stagePath); } catch (_) {}
+    throw e;
+  }
+}
+
+function clearMacQuarantine(appDir) {
+  if (process.platform !== 'darwin') return;
+  const appBundleMatch = String(appDir).match(/^.*\.app/);
+  if (appBundleMatch) {
+    try { execFileSync('xattr', ['-cr', appBundleMatch[0]], { stdio: 'ignore' }); } catch (_) {}
+  }
 }
 
 // Kill Antigravity processes and its language_server background processes (using execFileSync without shell)
@@ -65,23 +144,27 @@ function cleanAppCache(username) {
   log('正在扫描并安全清理 Antigravity 临时渲染与编译缓存...');
   const defaultUser = getHostUsername();
   const user = username ? sanitizeUsername(username) : defaultUser;
+  const homeDir = getUserHomeDir(user);
+  const isHostUser = user === defaultUser;
   let cacheRootDirs = [];
 
   if (process.platform === 'win32') {
+    const roamingDir = (isHostUser && process.env.APPDATA) || path.join(homeDir, 'AppData', 'Roaming');
+    const localDir = (isHostUser && process.env.LOCALAPPDATA) || path.join(homeDir, 'AppData', 'Local');
     cacheRootDirs = [
-      path.join('C:\\Users', user, 'AppData', 'Roaming', 'Antigravity'),
-      path.join('C:\\Users', user, 'AppData', 'Roaming', 'antigravity'),
-      path.join('C:\\Users', user, 'AppData', 'Local', 'antigravity')
+      path.join(roamingDir, 'Antigravity'),
+      path.join(roamingDir, 'antigravity'),
+      path.join(localDir, 'antigravity')
     ];
   } else if (process.platform === 'darwin') {
     cacheRootDirs = [
-      path.join('/Users', user, 'Library', 'Application Support', 'Antigravity'),
-      path.join('/Users', user, 'Library', 'Caches', 'com.google.antigravity')
+      path.join(homeDir, 'Library', 'Application Support', 'Antigravity'),
+      path.join(homeDir, 'Library', 'Caches', 'com.google.antigravity')
     ];
   } else {
     cacheRootDirs = [
-      path.join('/home', user, '.config', 'Antigravity'),
-      path.join('/home', user, '.cache', 'antigravity')
+      path.join(homeDir, '.config', 'Antigravity'),
+      path.join(homeDir, '.cache', 'antigravity')
     ];
   }
 
@@ -122,12 +205,14 @@ function getAppDir(username, useDefault, customPath) {
     const defaultUser = getHostUsername();
     const user = username ? sanitizeUsername(username) : defaultUser;
     if (isWin) {
-      dir = `C:\\Users\\${user}\\AppData\\Local\\Programs\\antigravity`;
+      const localAppData = (user === defaultUser && process.env.LOCALAPPDATA) ||
+        path.join(getUserHomeDir(user), 'AppData', 'Local');
+      dir = path.join(localAppData, 'Programs', 'antigravity');
     } else if (isMac) {
       // macOS: /Applications/Antigravity.app/Contents/Resources/app.asar
       dir = `/Applications/Antigravity.app/Contents`;
     } else {
-      dir = `/home/${user}/Antigravity/Antigravity-x64`;
+      dir = path.join(getUserHomeDir(user), 'Antigravity', 'Antigravity-x64');
     }
   }
 
@@ -4715,10 +4800,17 @@ const DOM_TRANSLATOR_INJECTION = `
   const stringCache = new Map();
   const MAX_STRING_CACHE = 5000;
 
-  function cacheAndReplace(rawText, trimmedKey, translatedVal) {
-    if (stringCache.size < MAX_STRING_CACHE) {
-      stringCache.set(trimmedKey, translatedVal);
+  // 缓存写满后按写入顺序淘汰最早条目（FIFO），避免被时间类动态文本
+  // （如 "Resets in 4h 50m"、"Thought for 12s"）占满后常用文案再也无法进入缓存
+  function cacheSet(key, val) {
+    if (!stringCache.has(key) && stringCache.size >= MAX_STRING_CACHE) {
+      stringCache.delete(stringCache.keys().next().value);
     }
+    stringCache.set(key, val);
+  }
+
+  function cacheAndReplace(rawText, trimmedKey, translatedVal) {
+    cacheSet(trimmedKey, translatedVal);
     return rawText.replace(trimmedKey, () => translatedVal);
   }
 
@@ -4759,19 +4851,19 @@ const DOM_TRANSLATOR_INJECTION = `
     // Customizations 扩展市场与已安装动态模式
     if (/^See\\s+(\\d+)\\s+more$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^See\\s+(\\d+)\\s+more$/i, '查看其余 $1 项');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^See\\s+less$/i.test(trimmed)) {
       const fixed = '收起';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^See\\s+more\\s+in\\s+(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^See\\s+more\\s+in\\s+(.+)$/i, '在“$1”中查看更多');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
@@ -4779,7 +4871,7 @@ const DOM_TRANSLATOR_INJECTION = `
       const target = trimmed.replace(/^Install\\s+/i, '');
       const translatedTarget = translateString(target);
       const fixed = '安装 ' + translatedTarget;
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
@@ -4787,80 +4879,80 @@ const DOM_TRANSLATOR_INJECTION = `
       const target = trimmed.replace(/^Uninstall\\s+/i, '');
       const translatedTarget = translateString(target);
       const fixed = '卸载 ' + translatedTarget;
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(\\d+)\\s+(?:tools?|工具)\\s+enabled$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^(\\d+)\\s+(?:tools?|工具)\\s+enabled$/i, '已启用 $1 个工具');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:Custom Agents|Custom 智能体|custom agents)$/i.test(trimmed)) {
       const fixed = '自定义智能体';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:Skills\\s*&\\s*Rules|skills\\s*&\\s*rules)$/i.test(trimmed)) {
       const fixed = '技能与规则';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:Built In|Built-in|built in)$/i.test(trimmed)) {
       const fixed = '内置';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Loading plugin[.…]*$/i.test(trimmed)) {
       const fixed = '正在加载插件...';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     // ===== 显示选项与筛选子菜单动态防御 =====
     if (/^(?:Last 提示词|Last Prompt|Last prompt)$/i.test(trimmed)) {
       const fixed = '最新提示词';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:Sort Conversations|Sort conversations|sort conversations)$/i.test(trimmed)) {
       const fixed = '对话排序';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:Archived Only|Archived only|archived only)$/i.test(trimmed)) {
       const fixed = '仅已归档';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Last\\s+(\\d+)\\s+days?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Last\\s+(\\d+)\\s+days?$/i, '最近 $1 天');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Last\\s+(\\d+)\\s+hours?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Last\\s+(\\d+)\\s+hours?$/i, '最近 $1 小时');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Show\\s+(\\d+)\\s+breakdowns?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Show\\s+(\\d+)\\s+breakdowns?$/i, '显示 $1 项明细');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Hide\\s+breakdowns?$/i.test(trimmed)) {
       const fixed = '隐藏明细';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
@@ -4868,54 +4960,54 @@ const DOM_TRANSLATOR_INJECTION = `
     // 1. 夹生词清理：Ran 命令 -> 已运行命令
     if (/^Ran\\s+命令$/i.test(trimmed)) {
       const fixed = '已运行命令';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
     if (/^Running\\s+命令$/i.test(trimmed)) {
       const fixed = '正在运行命令';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
     if (/^Ran\\s+命令:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Ran\\s+命令:\\s*(.+)$/i, '已运行命令: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
     if (/^Running\\s+命令:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Running\\s+命令:\\s*(.+)$/i, '正在运行命令: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
     if (/^Ran\\s+(\\d+)\\s+命令$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Ran\\s+(\\d+)\\s+命令$/i, '已运行 $1 条命令');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
     if (/^Running\\s+(\\d+)\\s+命令$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Running\\s+(\\d+)\\s+命令$/i, '正在运行 $1 条命令');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     // 执行模式副标题动态匹配
     if (/^Every command requires approval[.。]?$/i.test(trimmed)) {
       const fixed = /[.。]$/.test(trimmed) ? '每条命令都需要审批。' : '每条命令都需要审批';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
     if (/^Ask before sensitive operations[.。]?$/i.test(trimmed)) {
       const fixed = /[.。]$/.test(trimmed) ? '在执行敏感操作前询问。' : '在执行敏感操作前询问';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
     if (/^Run all commands without restrictions[.。]?$/i.test(trimmed)) {
       const fixed = /[.。]$/.test(trimmed) ? '无限制运行所有命令。' : '无限制运行所有命令';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
     if (/^Run all commands in sandbox without restrictions[.。]?$/i.test(trimmed)) {
       const fixed = /[.。]$/.test(trimmed) ? '在沙盒中无限制运行所有命令。' : '在沙盒中无限制运行所有命令';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
@@ -4924,7 +5016,7 @@ const DOM_TRANSLATOR_INJECTION = `
       const isArt = /artifacts?$/i.test(trimmed);
       const fixed = trimmed.replace(/^Explored\\s+(\\d+)\\s+files?,\\s*ran\\s+(\\d+)\\s+commands?,\\s*edited\\s+(\\d+)\\s+(?:files?|artifacts?)$/i, 
         isArt ? '已探索 $1 个文件，已执行 $2 条命令，已编辑 $3 个工件' : '已探索 $1 个文件，已执行 $2 条命令，已编辑 $3 个文件');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
@@ -4932,266 +5024,266 @@ const DOM_TRANSLATOR_INJECTION = `
       const isArt = /artifacts?$/i.test(trimmed);
       const fixed = trimmed.replace(/^Exploring\\s+(\\d+)\\s+files?,\\s*running\\s+(\\d+)\\s+commands?,\\s*editing\\s+(\\d+)\\s+(?:files?|artifacts?)$/i, 
         isArt ? '正在探索 $1 个文件，正在运行 $2 条命令，正在编辑 $3 个工件' : '正在探索 $1 个文件，正在运行 $2 条命令，正在编辑 $3 个文件');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Explored\\s+files?,\\s*ran\\s+commands?,\\s*edited\\s+(?:files?|artifacts?)$/i.test(trimmed)) {
       const fixed = /artifacts?$/i.test(trimmed) ? '已探索文件、已执行命令、已编辑工件' : '已探索文件、已执行命令、已编辑文件';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Exploring\\s+files?,\\s*running\\s+commands?,\\s*editing\\s+(?:files?|artifacts?)$/i.test(trimmed)) {
       const fixed = /artifacts?$/i.test(trimmed) ? '正在探索文件、运行命令、编辑工件' : '正在探索文件、运行命令、编辑文件';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Explored\\s+(\\d+)\\s+files?,\\s*ran\\s+(\\d+)\\s+commands?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Explored\\s+(\\d+)\\s+files?,\\s*ran\\s+(\\d+)\\s+commands?$/i, '已探索 $1 个文件，已执行 $2 条命令');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Exploring\\s+(\\d+)\\s+files?,\\s*running\\s+(\\d+)\\s+commands?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Exploring\\s+(\\d+)\\s+files?,\\s*running\\s+(\\d+)\\s+commands?$/i, '正在探索 $1 个文件，正在运行 $2 条命令');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Explored\\s+files?,\\s*ran\\s+commands?$/i.test(trimmed)) {
       const fixed = '已探索文件，已执行命令';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Exploring\\s+files?,\\s*running\\s+commands?$/i.test(trimmed)) {
       const fixed = '正在探索文件，正在运行命令';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Running\\s+commands?,\\s*editing\\s+(?:files?|artifacts?)$/i.test(trimmed)) {
       const fixed = /artifacts?$/i.test(trimmed) ? '正在运行命令、编辑工件' : '正在运行命令、编辑文件';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Ran\\s+commands?,\\s*edited\\s+(?:files?|artifacts?)$/i.test(trimmed)) {
       const fixed = /artifacts?$/i.test(trimmed) ? '已执行命令、已编辑工件' : '已执行命令、已编辑文件';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Explored\\s+files?,\\s*edited\\s+(?:files?|artifacts?)$/i.test(trimmed)) {
       const fixed = /artifacts?$/i.test(trimmed) ? '已探索文件、已编辑工件' : '已探索文件、已编辑文件';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Exploring\\s+files?,\\s*editing\\s+(?:files?|artifacts?)$/i.test(trimmed)) {
       const fixed = /artifacts?$/i.test(trimmed) ? '正在探索文件、编辑工件' : '正在探索文件、编辑文件';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     // 3. 统计数字类模式
     if (/^Ran\\s+(\\d+)\\s+commands?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Ran\\s+(\\d+)\\s+commands?$/i, '已运行 $1 条命令');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Running\\s+(\\d+)\\s+commands?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Running\\s+(\\d+)\\s+commands?$/i, '正在运行 $1 条命令');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Explored\\s+(\\d+)\\s+files?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Explored\\s+(\\d+)\\s+files?$/i, '已探索 $1 个文件');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Exploring\\s+(\\d+)\\s+files?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Exploring\\s+(\\d+)\\s+files?$/i, '正在探索 $1 个文件');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Edited\\s+(\\d+)\\s+files?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Edited\\s+(\\d+)\\s+files?$/i, '已编辑 $1 个文件');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Editing\\s+(\\d+)\\s+files?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Editing\\s+(\\d+)\\s+files?$/i, '正在编辑 $1 个文件');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Edited\\s+(\\d+)\\s+artifacts?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Edited\\s+(\\d+)\\s+artifacts?$/i, '已编辑 $1 个工件');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Editing\\s+(\\d+)\\s+artifacts?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Editing\\s+(\\d+)\\s+artifacts?$/i, '正在编辑 $1 个工件');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     // 4. 具体工具步骤行模式
     if (/^Ran\\s+command:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Ran\\s+command:\\s*(.+)$/i, '已运行命令: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Running\\s+command:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Running\\s+command:\\s*(.+)$/i, '正在运行命令: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Waiting for command completion \\(up to (\\d+) seconds\\)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Waiting for command completion \\(up to (\\d+) seconds\\)$/i, '等待命令执行完成（最多 $1 秒）');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Rejected sending (?:termination request|input) to command$/i.test(trimmed)) {
       const isTerm = /termination/i.test(trimmed);
       const fixed = isTerm ? '已拒绝向命令发送终止请求' : '已拒绝向命令发送输入';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Sent (?:termination request|input) to command$/i.test(trimmed)) {
       const isTerm = /termination/i.test(trimmed);
       const fixed = isTerm ? '已向命令发送终止请求' : '已向命令发送输入';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Suggested sending (?:termination request|input) to command$/i.test(trimmed)) {
       const isTerm = /termination/i.test(trimmed);
       const fixed = isTerm ? '建议向命令发送终止请求' : '建议向命令发送输入';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Sending (?:termination request|input) to command$/i.test(trimmed)) {
       const isTerm = /termination/i.test(trimmed);
       const fixed = isTerm ? '正在向命令发送终止请求' : '正在向命令发送输入';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Error sending (?:termination request|input) to command$/i.test(trimmed)) {
       const isTerm = /termination/i.test(trimmed);
       const fixed = isTerm ? '向命令发送终止请求时出错' : '向命令发送输入时出错';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Canceled edit to (.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Canceled edit to (.+)$/i, '已取消对 $1 的编辑');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Canceled creation of (.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Canceled creation of (.+)$/i, '已取消创建 $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Canceled deletion of (.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Canceled deletion of (.+)$/i, '已取消删除 $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Used MCP tool:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Used MCP tool:\\s*(.+)$/i, '调用 MCP 工具: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Used tool:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Used tool:\\s*(.+)$/i, '调用工具: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Generated image:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Generated image:\\s*(.+)$/i, '生成图像: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Browser task:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Browser task:\\s*(.+)$/i, '浏览器任务: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Opened browser:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Opened browser:\\s*(.+)$/i, '已打开浏览器: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Read URL:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Read URL:\\s*(.+)$/i, '读取 URL: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Searched web:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Searched web:\\s*(.+)$/i, '网页搜索: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Invoked subagent:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Invoked subagent:\\s*(.+)$/i, '调用子智能体: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Searched for files:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Searched for files:\\s*(.+)$/i, '搜索文件: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Searched for\\s+"([^"]+)"$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Searched for\\s+"([^"]+)"$/i, '搜索: "$1"');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Code search:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Code search:\\s*(.+)$/i, '代码搜索: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Internal search:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Internal search:\\s*(.+)$/i, '内部搜索: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Listed directory\\s+(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Listed directory\\s+(.+)$/i, '列出目录: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
@@ -5199,90 +5291,90 @@ const DOM_TRANSLATOR_INJECTION = `
       const fixed = trimmed.replace(/^No more older messages(?:,\\s*showing\\s+(\\d+)\\s+of\\s+(\\d+))?$/i, (m, a, b) => {
         return a && b ? ('已无更早的历史消息（共显示 ' + a + ' / ' + b + ' 条）') : '已无更早的历史消息';
       });
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Select model,\\s*current:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Select model,\\s*current:\\s*(.+)$/i, '选择模型，当前为: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Opens external link:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Opens external link:\\s*(.+)$/i, '打开外部链接: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Send feedback as\\s+(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Send feedback as\\s+(.+)$/i, '以 $1 身份发送反馈');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:Show All|Show all|show all|显示 All)$/i.test(trimmed)) {
       const fixed = '显示全部';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:File Reads|文件 Reads|file reads)$/i.test(trimmed)) {
       const fixed = '文件读取';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:File Writes|文件 Writes|file writes)$/i.test(trimmed)) {
       const fixed = '文件写入';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:Project options|项目 options)$/i.test(trimmed)) {
       const fixed = '项目选项';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:Agent response|智能体 response)$/i.test(trimmed)) {
       const fixed = '智能体回复';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:View Usage|View usage|view usage|查看 Usage)$/i.test(trimmed)) {
       const fixed = '查看使用额度';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:Permanently delete|Permanently 删除)$/i.test(trimmed)) {
       const fixed = '永久删除';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (trimmed.includes('could not be opened')) {
       const replacedCouldNot = trimmed.replace(/could not be opened/gi, '无法打开');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, replacedCouldNot);
+      cacheSet(trimmed, replacedCouldNot);
       return text.replace(trimmed, replacedCouldNot);
     }
 
     if (/Scan the code to/i.test(trimmed)) {
       if (/Scan the code to.*,\\s*or\\s*$/i.test(trimmed)) {
         const fixed = '扫描二维码以在远程控制中打开此设备，或';
-        if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+        cacheSet(trimmed, fixed);
         return text.replace(trimmed, fixed);
       }
       if (/Scan the code to.*(?:copy link|复制链接)/i.test(trimmed)) {
         const fixed = '扫描二维码以在远程控制中打开此设备，或复制链接。';
-        if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+        cacheSet(trimmed, fixed);
         return text.replace(trimmed, fixed);
       }
       if (/Scan the code to.*(?:Remote Control|远程\\s*控制)/i.test(trimmed)) {
         const fixed = '扫描二维码以在远程控制中打开此设备';
-        if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+        cacheSet(trimmed, fixed);
         return text.replace(trimmed, fixed);
       }
     }
@@ -5292,139 +5384,139 @@ const DOM_TRANSLATOR_INJECTION = `
       if (!/Scan the QR code/i.test(trimmed)) {
         fixed = '借助远程控制从另一台设备继续工作。';
       }
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/Scan the QR code or open the link below/i.test(trimmed)) {
       const fixed = '扫描下方二维码或打开下方链接。';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Invalid tool call$/i.test(trimmed)) {
       const fixed = '无效的工具调用';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^No Project$/i.test(trimmed)) {
       const fixed = '无项目';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^See all\\s*\\(([^)]+)\\)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^See all\\s*\\(([^)]+)\\)$/i, '查看全部 ($1)');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Ran\\s+(\\d+)\\s*(?:commands|命令)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Ran\\s+(\\d+)\\s*(?:commands|命令)$/i, '已运行 $1 条命令');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Load older messages,\\s*showing\\s+(\\d+)\\s+of\\s+(\\d+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Load older messages,\\s*showing\\s+(\\d+)\\s+of\\s+(\\d+)$/i, '加载历史消息，正在显示 $1 / $2 条');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Fold lines\\s+([0-9-]+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Fold lines\\s+([0-9-]+)$/i, '折叠第 $1 行');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:Advanced\\s*Settings|Advanced\\s*设置|advanced\\s*settings)$/i.test(trimmed)) {
       const fixed = '高级设置';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:Collapse\\s*All|Collapse\\s*all|collapse\\s*all)$/i.test(trimmed)) {
       const fixed = '全部折叠';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:Expand\\s*All|Expand\\s*all|expand\\s*all)$/i.test(trimmed)) {
       const fixed = '全部展开';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:Inherit\\s*Global|Inherits\\s*Global|继承\\s*Global)$/i.test(trimmed)) {
       const fixed = '继承全局';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Inherits\\s+your\\s+Global\\s+Permissions\\s+when\\s+working\\s+in\\s+this\\s+project\\.?$/i.test(trimmed)) {
       const fixed = '在此项目中工作时继承您的全局权限。';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Also\\s+includes.*(?:Global\\s+Permissions|全局权限).*when\\s+working\\s+in\\s+this\\s+project/i.test(trimmed)) {
       const fixed = '在当前项目中工作时，亦继承全局权限配置。';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Modify permissions for/i.test(trimmed)) {
       const fixed = '修改针对文件系统、终端命令以及 MCP 工具的安全权限。';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^(?:Tool[\\s ]+Permissions|工具[\\s ]*Permissions)$/i.test(trimmed)) {
       const fixed = '工具权限';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Setting up WSL:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Setting up WSL:\\s*(.+)$/i, '正在配置 WSL: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Installing into\\s*(.+?)[…\\.]*$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Installing into\\s*(.+?)[…\\.]*$/i, '正在安装到 $1…');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^This folder belongs to the WSL distro "([^"]+)", but this window is connected to "([^"]+)"\\.?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^This folder belongs to the WSL distro "([^"]+)", but this window is connected to "([^"]+)"\\.?$/i, '此文件夹属于 WSL 发行版“$1”，但当前窗口连接到“$2”。');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^This location cannot be opened in WSL:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^This location cannot be opened in WSL:\\s*(.+)$/i, '无法在 WSL 中打开此位置: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^The WSL distro "([^"]+)" is no longer installed\\.?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^The WSL distro "([^"]+)" is no longer installed\\.?$/i, 'WSL 发行版“$1”已不再安装。');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Antigravity opened on Windows instead\\.?$/i.test(trimmed)) {
       const fixed = 'Antigravity 已改为在 Windows 本地打开。';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^Connected to WSL:\\s*(.+)$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Connected to WSL:\\s*(.+)$/i, '已连接到 WSL: $1');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
@@ -5439,7 +5531,7 @@ const DOM_TRANSLATOR_INJECTION = `
       } else if (/used/i.test(trimmed)) {
         fixed = trimmed.replace(/(\\d+(?:\\.\\d+)?)% of the (?:customization )?budget is used[.。]?/i, '已使用 $1% 的自定义额度。');
       }
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
@@ -5454,13 +5546,13 @@ const DOM_TRANSLATOR_INJECTION = `
       } else {
         fixed = '插件是技能和 MCP 的打包集合，用于协助智能体在';
       }
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
     if (/^You can always change your choices in Settings[.。]?$/i.test(trimmed)) {
       const fixed = '你可以随时在设置中更改你的选择。';
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
@@ -5469,7 +5561,7 @@ const DOM_TRANSLATOR_INJECTION = `
       if (/change your choices in Settings/i.test(trimmed)) {
         fixed = 'Antigravity 中协同 Google 开发者产品工作。你可以随时在设置中更改你的选择。';
       }
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
@@ -5478,7 +5570,7 @@ const DOM_TRANSLATOR_INJECTION = `
       if (/change your choices in Settings/i.test(trimmed)) {
         fixed = '协同 Google 开发者产品工作。你可以随时在设置中更改你的选择。';
       }
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
+      cacheSet(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
 
@@ -5801,9 +5893,7 @@ const DOM_TRANSLATOR_INJECTION = `
     if (matchPunc) {
       finalTranslated += trailPunc;
     }
-    if (stringCache.size < MAX_STRING_CACHE) {
-      stringCache.set(trimmed, finalTranslated);
-    }
+    cacheSet(trimmed, finalTranslated);
     return text.replace(trimmed, finalTranslated);
   }
 
@@ -6105,6 +6195,15 @@ const DOM_TRANSLATOR_INJECTION = `
   // 性能优化 3：已处理文本节点记忆化 WeakSet，消除父容器重绘时的重复遍历
   const translatedNodes = new WeakSet();
 
+  // value 属性仅允许翻译按钮型 <input>（button/submit/reset）的显示文字。
+  // <option>/<button>/<li>/<data> 等元素的 value 是程序内部值（如下拉选项的枚举值），
+  // 翻译后应用读取到的会变成中文，导致设置与选择逻辑静默出错。
+  function isTranslatableValueTarget(el) {
+    if (!el || el.tagName !== 'INPUT' || !el.getAttribute) return false;
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    return type === 'button' || type === 'submit' || type === 'reset';
+  }
+
   function translateNode(node) {
     if (!node) return;
     if (shouldSkipNode(node)) return;
@@ -6123,12 +6222,12 @@ const DOM_TRANSLATOR_INJECTION = `
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       ['placeholder', 'title', 'aria-label', 'value'].forEach(attr => {
         if (node.hasAttribute && node.hasAttribute(attr)) {
-          // 双重锁死：绝对不翻译任何输入框或编辑区的用户 value 属性
-          if (attr === 'value' && (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA')) {
+          // 双重锁死：value 仅放行按钮型 <input>，绝不翻译输入框、编辑区与选项的内部值
+          if (attr === 'value' && !isTranslatableValueTarget(node)) {
             return;
           }
           const original = node.getAttribute(attr);
-          if (original && (node.tagName !== 'INPUT' || node.type === 'button' || node.type === 'submit' || attr !== 'value')) {
+          if (original) {
             const translated = translateString(original);
             if (original !== translated) {
               node.setAttribute(attr, translated);
@@ -6195,7 +6294,7 @@ const DOM_TRANSLATOR_INJECTION = `
         for (const [target, attrs] of pendingAttrNodes) {
           if (!shouldSkipNode(target)) {
             for (const attrName of attrs) {
-              if (attrName === 'value' && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+              if (attrName === 'value' && !isTranslatableValueTarget(target)) {
                 continue;
               }
               const original = target.getAttribute(attrName);
@@ -6784,9 +6883,9 @@ async function runLocalizationWorkflow(appDir, options = {}) {
     throw new Error(`找不到 app.asar 路径: ${asarPath}\n请确认软件是否安装在指定路径。`);
   }
 
-  // 1. Kill running instances unless --no-kill is specified
+  // 1. Kill running instances (and wait for them to release file locks) unless --no-kill is specified
   if (!options.noKill && !process.argv.includes('--no-kill')) {
-    killApp();
+    stopAppAndWait();
   }
 
   // 2. Backup app.asar (prefer clean official backup if available, and detect official client upgrades)
@@ -6867,24 +6966,20 @@ async function runLocalizationWorkflow(appDir, options = {}) {
     fs.rmSync(EXTRACT_DIR, { recursive: true, force: true });
   } catch (_) {}
 
-  // 7. Deploy newly packed app.asar and sync local app.asar.ready
+  // 7. Deploy newly packed app.asar atomically, then sync local app.asar.ready
   log('正在部署新的汉化 app.asar...');
   try {
-    fs.copyFileSync(tempAsar, asarPath);
-    try {
-      fs.copyFileSync(tempAsar, path.join(WORKSPACE_DIR, 'app.asar.ready'));
-    } catch (_) {}
-    fs.unlinkSync(tempAsar);
-    if (process.platform === 'darwin') {
-      const appBundleMatch = appDir.match(/^.*\.app/);
-      if (appBundleMatch) {
-        try { execFileSync('xattr', ['-cr', appBundleMatch[0]], { stdio: 'ignore' }); } catch (_) {}
-      }
-    }
+    atomicReplaceFile(tempAsar, asarPath);
+    clearMacQuarantine(appDir);
     log('汉化 app.asar 部署成功！');
   } catch (e) {
-    throw new Error('复制汉化包到系统程序目录失败 (请检查是否有读写权限): ' + e.message);
+    try { fs.unlinkSync(tempAsar); } catch (_) {}
+    throw new Error('复制汉化包到系统程序目录失败 (请检查是否有读写权限，或客户端是否仍在运行): ' + e.message);
   }
+  try {
+    fs.copyFileSync(tempAsar, path.join(WORKSPACE_DIR, 'app.asar.ready'));
+  } catch (_) {}
+  try { fs.unlinkSync(tempAsar); } catch (_) {}
 
   log('🎉 Antigravity-ZH-CN 一键汉化成功完成！现在您可以安全启动或重启程序了。');
   log('=================== 汉化流程结束 ===================');
@@ -6904,20 +6999,26 @@ function runRestoreWorkflow(appDir, options = {}) {
   if (isLocalizedAsar(backupPath)) {
     throw new Error('检测到备份文件 `app.asar.bak` 本身已被汉化包污染，无法还原为官方原版！请重新安装官方安装包以恢复。');
   }
+  if (fs.existsSync(asarPath) && !isLocalizedAsar(asarPath)) {
+    log('当前 app.asar 已是官方原版（未检测到汉化代码），无需还原。');
+    log('=================== 还原流程结束 ===================');
+    return;
+  }
+  // 防止客户端已升级后用旧版本备份降级覆盖：汉化包的版本号等于其构建来源的原版版本号
+  const currentVersion = fs.existsSync(asarPath) ? readAsarPackageVersion(asarPath) : null;
+  const backupVersion = readAsarPackageVersion(backupPath);
+  if (currentVersion && backupVersion && currentVersion !== backupVersion) {
+    throw new Error(`备份文件版本 (v${backupVersion}) 与当前客户端版本 (v${currentVersion}) 不一致，直接还原会导致版本错配。请重新安装官方 v${currentVersion} 安装包以恢复英文原版。`);
+  }
 
   if (!options.noKill && !process.argv.includes('--no-kill')) {
-    killApp();
+    stopAppAndWait();
   }
 
   log('正在从安全备份恢复原始官方 app.asar...');
   try {
-    fs.copyFileSync(backupPath, asarPath);
-    if (process.platform === 'darwin') {
-      const appBundleMatch = appDir.match(/^.*\.app/);
-      if (appBundleMatch) {
-        try { execFileSync('xattr', ['-cr', appBundleMatch[0]], { stdio: 'ignore' }); } catch (_) {}
-      }
-    }
+    atomicReplaceFile(backupPath, asarPath);
+    clearMacQuarantine(appDir);
     log('还原原始 app.asar 成功！软件已恢复为官方英文版。');
   } catch (e) {
     throw new Error('恢复文件失败: ' + e.message);

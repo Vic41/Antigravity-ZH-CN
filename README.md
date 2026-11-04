@@ -4,7 +4,7 @@
 
 ### Google Antigravity 2.0 桌面端 · 零依赖一键深度汉化工具
 
-[![Release](https://img.shields.io/badge/汉化包版本-v0.0.1-8b5cf6?style=for-the-badge)](https://github.com/Vic41/Antigravity-ZH-CN/releases)
+[![Release](https://img.shields.io/badge/汉化包版本-v0.0.2-8b5cf6?style=for-the-badge)](https://github.com/Vic41/Antigravity-ZH-CN/releases)
 [![Version](https://img.shields.io/badge/适配客户端-v2.28.2-6366f1?style=for-the-badge)](https://github.com/Vic41/Antigravity-ZH-CN)
 [![Platform](https://img.shields.io/badge/平台支持-macOS%20%7C%20Windows%20%7C%20Linux-10b981?style=for-the-badge)](#)
 [![Dependencies](https://img.shields.io/badge/外部依赖-0%20(纯%20Node.js%20原生)-f59e0b?style=for-the-badge)](#)
@@ -18,7 +18,7 @@
 ## ✨ 核心特性
 
 1. **全栈三层深度汉化（非仅菜单栏）**
-   - **主进程原生层 (`dist/menus.js` / `ipc.js` / `main.js` / `updater.js`)**：完整汉化 macOS / Windows 顶部应用菜单、Dock 菜单、右键上下文菜单、系统弹窗、WebAuthn 通行密钥窗口与 WSL 状态提示。
+   - **主进程原生层 (`dist/menu.js` / `ipcHandlers.js` / `main.js` / `updater.js`)**：完整汉化 macOS / Windows 顶部应用菜单、Dock 菜单、右键上下文菜单、系统弹窗、WebAuthn 通行密钥窗口与 WSL 状态提示。
    - **沙盒预加载层 (`dist/preload.js` / `wizardPreload.js`) + 主世界注入 (`dist/utils.js`)**：突破 Electron `sandbox: true` 预加载沙盒限制，将自包含的 `MutationObserver` 动态 DOM 翻译引擎与 **React 碎片节点智能拼接器**直接注入渲染器。
    - **静态模板层 (`wizardHtml.js` / `cablev2.js`)**：安装向导与通行密钥扫码页静态 HTML 直译。
 2. **极简轻量 · 零第三方依赖**
@@ -36,8 +36,8 @@
 
 点击本仓库右侧的 **[Releases（发布页）](https://github.com/Vic41/Antigravity-ZH-CN/releases)**，在最新版本下方的 **Assets** 中根据您的系统下载：
 
-- 🍎 **苹果电脑 (macOS)**：点击下载 **`Antigravity-ZH-CN-v0.0.1-macOS.zip`** 并解压
-- 🪟 **Windows 电脑**：点击下载 **`Antigravity-ZH-CN-v0.0.1-Windows.zip`** 并解压
+- 🍎 **苹果电脑 (macOS)**：点击下载 **`Antigravity-ZH-CN-v0.0.2-macOS.zip`** 并解压
+- 🪟 **Windows 电脑**：点击下载 **`Antigravity-ZH-CN-v0.0.2-Windows.zip`** 并解压
 
 > *(注：请直接下载带 `-macOS.zip` 或 `-Windows.zip` 后缀的专用包，里面只包含您当前系统需要的双击脚本，无需下载 `Source code`。)*
 
@@ -70,7 +70,7 @@
 
 #### 💻 命令行 / 开发者模式（macOS / Windows / Linux 通用）
 
-如果您的电脑已安装 [Node.js](https://nodejs.org/)（v14 及以上），可在项目目录下直接通过终端执行：
+如果您的电脑已安装 [Node.js](https://nodejs.org/)（v14.14 及以上），可在项目目录下直接通过终端执行：
 
 ```bash
 # 一键解包、注入汉化并重新打包部署（默认动作）

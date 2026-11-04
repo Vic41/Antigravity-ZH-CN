@@ -54,7 +54,8 @@ async function findAvailablePatch({ workspaceDir, targetVersion } = {}) {
     const patchVersion = readAsarPackageVersion(readyPath);
     const normTarget = normalizeVersion(targetVersion);
     const normPatch = normalizeVersion(patchVersion);
-    const isMatch = Boolean(!normTarget || !normPatch || normTarget === normPatch);
+    // 任一方版本未知时无法确认兼容性，一律视为不匹配
+    const isMatch = Boolean(normTarget && normPatch && normTarget === normPatch);
     return {
       source: 'ready-file',
       path: readyPath,
@@ -163,9 +164,21 @@ async function executeAutoRestore({
   const appNorm = normalizeVersion(status.appVersion);
   const patchNorm = normalizeVersion(patch.version);
 
+  // 版本无法读取时拒绝安装：损坏或来源不明的补丁包不能盲目覆盖到客户端
+  if (!appNorm || !patchNorm) {
+    return {
+      success: false,
+      code: 'VERSION_UNKNOWN',
+      appVersion: status.appVersion,
+      patchVersion: patch.version,
+      patchPath: patch.path,
+      message: `[安全拦截] 无法读取${!appNorm ? '客户端' : '预打包汉化文件'}的版本号，无法确认兼容性。请直接运行 node localize.js 对当前客户端重新解包汉化。`
+    };
+  }
+
   // 核心安全拦截：版本兼容性校验
-  // 如果客户端版本与补丁包版本均明确且不一致，坚决阻止盲目覆盖！
-  if (appNorm && patchNorm && appNorm !== patchNorm) {
+  // 客户端版本与补丁包版本不一致时，坚决阻止盲目覆盖！
+  if (appNorm !== patchNorm) {
     return {
       success: false,
       code: 'VERSION_MISMATCH',
