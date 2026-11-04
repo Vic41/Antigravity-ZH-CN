@@ -12,7 +12,8 @@ const {
   findAvailablePatch
 } = require('./auto-restore');
 
-const CURRENT_VERSION = '2.28.2';
+const CURRENT_VERSION = '0.0.1';
+const TARGET_AGY_VERSION = '2.28.2';
 const WORKSPACE_DIR = __dirname;
 const EXTRACT_DIR = path.join(WORKSPACE_DIR, 'extracted');
 
@@ -6969,7 +6970,7 @@ if (process.argv.includes('--apply-only')) {
   (async () => {
     const status = await checkClientStatus({ appDir: defaultAppDir, getResourcesDir });
     const patch = await findAvailablePatch({ workspaceDir: WORKSPACE_DIR, targetVersion: status.appVersion });
-    console.log(JSON.stringify({ status, patch, currentVersion: CURRENT_VERSION }, null, 2));
+    console.log(JSON.stringify({ status, patch, patchVersion: CURRENT_VERSION, targetAgyVersion: TARGET_AGY_VERSION }, null, 2));
     process.exit(0);
   })().catch(err => {
     console.error('[异常]', err.message);

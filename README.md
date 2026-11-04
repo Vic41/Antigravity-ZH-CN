@@ -4,7 +4,8 @@
 
 ### Google Antigravity 2.0 桌面端 · 零依赖一键深度汉化工具
 
-[![Version](https://img.shields.io/badge/适配版本-v2.28.2-6366f1?style=for-the-badge)](https://github.com/Vic41/Antigravity-ZH-CN)
+[![Release](https://img.shields.io/badge/汉化包版本-v0.0.1-8b5cf6?style=for-the-badge)](https://github.com/Vic41/Antigravity-ZH-CN/releases)
+[![Version](https://img.shields.io/badge/适配客户端-v2.28.2-6366f1?style=for-the-badge)](https://github.com/Vic41/Antigravity-ZH-CN)
 [![Platform](https://img.shields.io/badge/平台支持-macOS%20%7C%20Windows%20%7C%20Linux-10b981?style=for-the-badge)](#)
 [![Dependencies](https://img.shields.io/badge/外部依赖-0%20(纯%20Node.js%20原生)-f59e0b?style=for-the-badge)](#)
 

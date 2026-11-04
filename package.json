@@ -1,6 +1,6 @@
 {
   "name": "antigravity-zh-cn",
-  "version": "2.28.2",
+  "version": "0.0.1",
   "description": "Google Antigravity 2.0 桌面端零依赖一键深度汉化工具 (macOS / Windows / Linux)",
   "main": "localize.js",
   "bin": {
