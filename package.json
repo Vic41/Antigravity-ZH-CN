@@ -1,16 +1,17 @@
 {
   "name": "antigravity-zh-cn",
   "version": "2.28.2",
-  "description": "Google Antigravity 2.0 桌面端一键深度汉化与本地化控制中心 (macOS / Windows / Linux)",
+  "description": "Google Antigravity 2.0 桌面端零依赖一键深度汉化工具 (macOS / Windows / Linux)",
   "main": "localize.js",
   "bin": {
     "antigravity-zh-cn": "./localize.js"
   },
   "scripts": {
-    "start": "node localize.js",
+    "start": "node localize.js --now",
     "now": "node localize.js --now",
     "restore": "node localize.js --restore",
     "auto-restore": "node localize.js --auto-restore",
+    "clean-cache": "node localize.js --clean-cache",
     "status": "node localize.js --check-status"
   },
   "keywords": [

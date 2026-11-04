@@ -35,118 +35,35 @@ function normalizeVersion(ver) {
 }
 
 /**
- * 寻找本地可用的汉化补丁包
- * 优先级：
- * 1. 根目录的 app.asar.ready（离线完整包或就绪包）
- * 2. releaseManager 缓存目录 downloads/ 中的已验证包
+ * 寻找本地可用的预打包汉化补丁包 (app.asar.ready)
  */
-async function findAvailablePatch({ workspaceDir, targetVersion, releaseManager } = {}) {
+async function findAvailablePatch({ workspaceDir, targetVersion } = {}) {
   const wsDir = workspaceDir || path.resolve(__dirname);
-  const candidates = [];
-
-  // 1. 根目录 app.asar.ready
   const readyPath = path.join(wsDir, 'app.asar.ready');
-  if (fs.existsSync(readyPath)) {
-    try {
-      const stat = await fsp.stat(readyPath);
-      if (stat.isFile() && stat.size > 0) {
-        const patchVersion = readAsarPackageVersion(readyPath);
-        candidates.push({
-          source: 'ready-file',
-          path: readyPath,
-          version: patchVersion,
-          size: stat.size
-        });
-      }
-    } catch (_) {}
-  }
 
-  // 2. downloads/ 缓存目录中由 releaseManager 下载的补丁包
-  if (releaseManager && typeof releaseManager.listFiles === 'function') {
-    try {
-      const cached = await releaseManager.listFiles();
-      for (const item of cached) {
-        if (!item.modified && item.path && fs.existsSync(item.path)) {
-          const patchVersion = readAsarPackageVersion(item.path) || normalizeVersion(item.tag);
-          candidates.push({
-            source: 'download-cache',
-            cacheId: item.cacheId,
-            tag: item.tag,
-            path: item.path,
-            version: patchVersion,
-            size: item.size,
-            sha256: item.sha256
-          });
-        }
-      }
-    } catch (_) {}
-  } else {
-    // 即使未注入 releaseManager，也可直接扫描 downloads 目录（支持平铺文件与子目录）
-    const downloadsDir = path.join(wsDir, 'downloads');
-    if (fs.existsSync(downloadsDir)) {
-      try {
-        const entries = await fsp.readdir(downloadsDir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (entry.isFile() && (entry.name.endsWith('.asar') || entry.name.endsWith('.ready'))) {
-            const fullPath = path.join(downloadsDir, entry.name);
-            try {
-              const stat = await fsp.stat(fullPath);
-              if (stat.size > 0) {
-                candidates.push({
-                  source: 'downloads-dir',
-                  path: fullPath,
-                  version: readAsarPackageVersion(fullPath),
-                  size: stat.size
-                });
-              }
-            } catch (_) {}
-          } else if (entry.isDirectory() && !entry.name.startsWith('.')) {
-            // 兼容 releaseManager 创建的 downloads/<cacheId>/app.asar.ready 结构
-            const subDir = path.join(downloadsDir, entry.name);
-            const candidateNames = ['app.asar.ready', 'app.asar'];
-            for (const candName of candidateNames) {
-              const subFile = path.join(subDir, candName);
-              if (fs.existsSync(subFile)) {
-                try {
-                  const stat = await fsp.stat(subFile);
-                  if (stat.isFile() && stat.size > 0) {
-                    candidates.push({
-                      source: 'downloads-sub-dir',
-                      path: subFile,
-                      version: readAsarPackageVersion(subFile),
-                      size: stat.size
-                    });
-                    break;
-                  }
-                } catch (_) {}
-              }
-            }
-          }
-        }
-      } catch (_) {}
-    }
-  }
-
-  if (candidates.length === 0) {
+  if (!fs.existsSync(readyPath)) {
     return null;
   }
 
-  const normTarget = normalizeVersion(targetVersion);
-
-  // 如果目标版本明确，优先查找版本精确匹配的补丁
-  if (normTarget) {
-    const exactMatch = candidates.find(c => normalizeVersion(c.version) === normTarget);
-    if (exactMatch) {
-      return { ...exactMatch, isMatch: true };
+  try {
+    const stat = await fsp.stat(readyPath);
+    if (!stat.isFile() || stat.size === 0) {
+      return null;
     }
+    const patchVersion = readAsarPackageVersion(readyPath);
+    const normTarget = normalizeVersion(targetVersion);
+    const normPatch = normalizeVersion(patchVersion);
+    const isMatch = Boolean(!normTarget || !normPatch || normTarget === normPatch);
+    return {
+      source: 'ready-file',
+      path: readyPath,
+      version: patchVersion,
+      size: stat.size,
+      isMatch
+    };
+  } catch (_) {
+    return null;
   }
-
-  // 若无精确匹配，按优先级返回第一个候选（并标记是否匹配）
-  const primary = candidates[0];
-  const primaryNorm = normalizeVersion(primary.version);
-  const isMatch = Boolean(!normTarget || !primaryNorm || normTarget === primaryNorm);
-
-  return { ...primary, isMatch };
 }
 
 /**
@@ -201,7 +118,6 @@ async function executeAutoRestore({
   appDir,
   getResourcesDir,
   workspaceDir,
-  releaseManager,
   isAppRunning,
   stopProcesses,
   forceStop = true,
@@ -231,8 +147,7 @@ async function executeAutoRestore({
   // 寻找或使用指定的补丁包
   const patch = candidatePatch || await findAvailablePatch({
     workspaceDir: wsDir,
-    targetVersion: status.appVersion,
-    releaseManager
+    targetVersion: status.appVersion
   });
 
   if (!patch) {
@@ -240,7 +155,7 @@ async function executeAutoRestore({
       success: false,
       code: 'NO_PATCH_FOUND',
       appVersion: status.appVersion,
-      message: '本地未找到可用的汉化补丁包 (app.asar.ready 或 downloads 缓存)，请启动控制中心下载。'
+      message: '本地未找到预打包汉化文件 (app.asar.ready)，请直接运行 node localize.js 重新打包汉化。'
     };
   }
 
@@ -256,7 +171,7 @@ async function executeAutoRestore({
       appVersion: status.appVersion,
       patchVersion: patch.version,
       patchPath: patch.path,
-      message: `[安全拦截] 客户端已由官方更新为 v${status.appVersion}，但本地补丁版本为 v${patch.version}。为防止界面崩溃或白屏，已阻止覆盖。请通过控制中心下载对应 v${status.appVersion} 的汉化包。`
+      message: `[安全拦截] 客户端已由官方更新为 v${status.appVersion}，但本地预打包文件版本为 v${patch.version}。为防止界面异常，请直接运行 node localize.js 对新版本重新解包汉化。`
     };
   }
 

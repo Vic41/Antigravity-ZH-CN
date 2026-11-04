@@ -1,158 +1,128 @@
-# Antigravity-ZH-CN
+<div align="center">
 
-**Google Antigravity 2.0 桌面客户端一键深度汉化与可视化控制中心**
+# 🌌 Antigravity-ZH-CN
 
-[![GitHub Repo](https://img.shields.io/badge/GitHub-Vic41%2FAntigravity--ZH--CN-blue?logo=github)](https://github.com/Vic41/Antigravity-ZH-CN)
-[![Platform](https://img.shields.io/badge/适用平台-macOS%20%7C%20Windows%20%7C%20Linux-informational)](#)
-[![Version](https://img.shields.io/badge/支持版本-Antigravity%20v2.28.2%2B-success)](#)
-[![Zero Dependency](https://img.shields.io/badge/外部依赖-0%20(纯原生%20Node.js)-brightgreen)](#)
-[![License](https://img.shields.io/badge/开源协议-MIT-gold)](LICENSE)
+### Google Antigravity 2.0 桌面端 · 零依赖一键深度汉化工具
 
-专为 **Google Antigravity 2.0** 打造的零外部依赖、非破坏性深度简体中文汉化工具。
-- **全界面深度覆盖**：完整汉化顶部菜单栏、系统托盘、左侧会话与项目栏、对话与规划模式（Planning Mode）、斜杠命令（`/`）、上下文提及（`@`）、系统设置（150+ 项）、权限沙盒、插件市场（Skills / Rules / Plugins / MCP / Hooks）以及右侧辅助面板（Diff 对比、Git 提交、终端与浏览器）。
-- **代码与输入绝对安全**：物理隔离代码编辑器（Monaco）、代码块、终端与用户输入框，绝不误翻或篡改您的代码与提问内容。
-- **无损备份与一键还原**：首次汉化自动备份官方原版 `app.asar.bak`，随时可一键无损恢复为纯英文原版。
+[![Version](https://img.shields.io/badge/适配版本-v2.28.2-6366f1?style=for-the-badge)](https://github.com/Vic41/Antigravity-ZH-CN)
+[![Platform](https://img.shields.io/badge/平台支持-macOS%20%7C%20Windows%20%7C%20Linux-10b981?style=for-the-badge)](#)
+[![Dependencies](https://img.shields.io/badge/外部依赖-0%20(纯%20Node.js%20原生)-f59e0b?style=for-the-badge)](#)
 
----
+**原生菜单栏 · 设置面板 · 欢迎页 · 对话与智能体全界面 · React 碎片拼接 · 零依赖双引擎直装**
 
-## 🚀 小白快速上手指南（4 种方式任选其一）
-
-### 方式一：AI 一句话全自动安装（最推荐，零动手）
-
-如果您已经打开了英文版 Antigravity，直接复制下面这段话，粘贴到 Antigravity 的聊天输入框发送给 AI 即可：
-
-```text
-帮我安装 https://github.com/Vic41/Antigravity-ZH-CN 的汉化补丁：请将该仓库克隆到本地，执行 node localize.js --now --no-kill 完成一键汉化，完成后提醒我重启客户端即可。
-```
-
-> 发送后，Antigravity 内部的 AI 智能体会自动帮您下载本仓库并注入中文补丁，您只需按 `Cmd + Q`（Mac）或关闭重开软件即可变成全中文！
+</div>
 
 ---
 
-### 方式二：下载压缩包 -> 双击图标一键汉化（适合普通用户）
+## ✨ 核心特性
 
-#### 第一步：下载并解压本项目
-1. 点击本页面右上角绿色的 **`<> Code`** 按钮，再点击 **`Download ZIP`** 下载压缩包。
-2. 将下载好的 `.zip` 压缩包解压到任意文件夹（如桌面或下载目录）。
-
-#### 第二步：根据您的电脑系统双击对应文件
-
-##### 🍎 macOS 苹果电脑用户
-打开解压后的文件夹，里面有两个可直接双击的 `.command` 图标：
-- **想直接一键完成汉化**：双击 **`一键汉化.command`**
-  - 脚本会自动关闭正在运行的 Antigravity、备份英文原版、打入中文补丁、自动修复 macOS 签名拦截，并**自动为您重新打开汉化后的 Antigravity**。
-- **想打开可视化网页控制台**：双击 **`双击运行汉化.command`**
-  - 浏览器会自动弹出可视化控制面板（`http://localhost:3388`），点击页面上的 **「一键汉化」** 按钮即可。
-
-> **💡 Mac 首次双击提示“无法打开”怎么办？**
-> 如果 macOS 弹窗提示“无法验证开发者”，只需**按住键盘 `Control` 键（或右键）点击该文件 -> 选择「打开」**，在弹出的窗口中再点一次「打开」即可；或者打开「终端」输入 `chmod +x *.command *.sh` 回车。
-
-##### 🪟 Windows 电脑用户
-打开解压后的文件夹：
-- **首次汉化或打开可视化控制台**：双击 **`双击运行汉化.bat`**
-  - 浏览器会自动打开可视化控制面板（`http://localhost:3388`），点击 **「一键汉化」** 即可完成部署。
-- **软件官方升级后恢复中文**：双击 **`一键更新汉化.bat`**
-  - 无需打开网页，自动校验版本并秒级恢复中文界面。
+1. **全栈三层深度汉化（非仅菜单栏）**
+   - **主进程原生层 (`dist/menus.js` / `ipc.js` / `main.js` / `updater.js`)**：完整汉化 macOS / Windows 顶部应用菜单、Dock 菜单、右键上下文菜单、系统弹窗、WebAuthn 通行密钥窗口与 WSL 状态提示。
+   - **沙盒预加载层 (`dist/preload.js` / `wizardPreload.js`) + 主世界注入 (`dist/utils.js`)**：突破 Electron `sandbox: true` 预加载沙盒限制，将自包含的 `MutationObserver` 动态 DOM 翻译引擎与 **React 碎片节点智能拼接器**直接注入渲染器。
+   - **静态模板层 (`wizardHtml.js` / `cablev2.js`)**：安装向导与通行密钥扫码页静态 HTML 直译。
+2. **极简轻量 · 零第三方依赖**
+   - 移除冗余的 Web 服务面板与网络模块，专注纯粹的**一键汉化与一键还原**。
+   - 内置纯 Node.js 原生二进制流 ASAR 解包/打包器（[`asar-tool.js`](./asar-tool.js)），无需 `npm install` 或下载 `@electron/asar`，完整保留 `app.asar.unpacked` 标记。
+   - 随仓附带预打包 [`app.asar.ready`](./app.asar.ready)，即使电脑**未安装 Node.js**，双击脚本也能自动回退至免环境直装模式。
+3. **非破坏性安全备份与防污染校验**
+   - 首次汉化前自动备份官方原版至 `app.asar.bak`，并通过二进制特征指纹检测确保原版备份永不被汉化包覆盖污染。
 
 ---
 
-### 方式三：免环境直接替换文件（适合未安装 Node.js 的电脑）
+## 🚀 外部用户使用指南（3 步极简上手）
 
-如果您电脑上没有安装 Node.js，且不想运行任何脚本，可以直接使用预制好的 `app.asar.ready`（或从 Releases 下载 `app.asar`）进行手动覆盖：
+### 第一步：下载本项目
 
-1. **完全退出**正在运行的 Antigravity 软件。
-2. 打开 Antigravity 的安装目录中的 `Resources` 文件夹：
-   - **macOS 路径**：打开访达（Finder）-> 应用程序 -> 右键点击 `Antigravity.app` -> 选择 **「显示包内容」** -> 依次进入 `Contents/Resources/`
-   - **Windows 路径**：按 `Win + R` 输入 `%LOCALAPPDATA%\Programs\antigravity\resources\` 回车
-3. 先将原本的 `app.asar` 复制一份改名为 `app.asar.bak`（作为英文版备份）。
-4. 将本项目的 `app.asar.ready` 复制进去，并改名为 **`app.asar`** 覆盖原文件。
-5. 重新启动 Antigravity 即可看到全中文界面！
+- **方式 A（直接下载压缩包，适合所有用户）**：
+  点击本仓库右上角绿色的 **`<> Code`** 按钮 ➔ 选择 **`Download ZIP`**，下载后解压到电脑任意文件夹。
+- **方式 B（Git 克隆）**：
+  ```bash
+  git clone https://github.com/Vic41/Antigravity-ZH-CN.git
+  cd Antigravity-ZH-CN
+  ```
 
 ---
 
-### 方式四：终端命令行一键极速模式（适合开发者）
+### 第二步：一键执行汉化
 
-在终端（Terminal / PowerShell）中复制粘贴以下命令即可：
+#### 🍎 macOS 用户
+
+1. 打开解压后的文件夹，直接双击 **`一键汉化.command`**。
+   - 脚本会自动完成：**安全备份原版 ➔ 注入中文语言包 ➔ 清除签名缓存 ➔ 自动重启 Antigravity**。
+   - 若电脑已安装 Node.js，将实时解包当前客户端并注入汉化；若未安装 Node.js，将自动使用内置的 `app.asar.ready` 免环境直装。
+2. 如需恢复英文原版，直接双击 **`还原英文原版.command`** 即可。
+
+> **💡 macOS 首次双击提示“无法打开 / 未受信任的开发者”怎么办？**
+> 在访达（Finder）中对该 `.command` 文件 **按住 `Control` 键并点击右键 ➔ 选择“打开”**，在弹出框中再次点击“打开”即可。或者在终端运行：
+> ```bash
+> chmod +x *.command *.sh && xattr -cr . && ./一键汉化.command
+> ```
+
+---
+
+#### 🪟 Windows 用户
+
+1. 打开解压后的文件夹，直接双击 **`一键汉化.bat`**。
+   - 若电脑已安装 Node.js，将自动解包并注入汉化；若未安装 Node.js，将自动把内置的 `app.asar.ready` 覆盖到 `%LOCALAPPDATA%\Programs\antigravity\resources\app.asar`（并自动创建 `app.asar.bak` 备份）。
+2. 如需恢复英文原版，直接双击 **`还原英文原版.bat`** 即可。
+
+---
+
+#### 💻 命令行 / 开发者模式（macOS / Windows / Linux 通用）
+
+如果您的电脑已安装 [Node.js](https://nodejs.org/)（v14 及以上），可在项目目录下直接通过终端执行：
 
 ```bash
-# 1. 克隆仓库并进入目录
-git clone --depth=1 https://github.com/Vic41/Antigravity-ZH-CN.git
-cd Antigravity-ZH-CN
+# 一键解包、注入汉化并重新打包部署（默认动作）
+node localize.js
 
-# 2. 立即执行一键汉化（纯 Node.js 原生解包封包，耗时 < 1 秒）
-node localize.js --now
+# 一键还原为官方英文原版（从 app.asar.bak 恢复）
+node localize.js --restore
+
+# 官方客户端自动更新后，快速检测并恢复汉化
+node localize.js --auto-restore
+
+# 安全清理客户端渲染缓存（解决个别界面文字未刷新，不伤账号与配置）
+node localize.js --clean-cache
+
+# 诊断当前客户端安装状态与版本信息（输出 JSON）
+node localize.js --check-status
 ```
 
-#### 全部命令行参数说明
+> **自定义客户端安装路径**：如果您的 Antigravity 安装在非默认位置，可通过环境变量 `AGY_APP_DIR` 指定路径：
+> ```bash
+> AGY_APP_DIR="/your/custom/path" node localize.js
+> ```
 
-| 命令 | 功能说明 |
+---
+
+## 📁 项目结构说明
+
+| 文件名 | 作用说明 |
 | :--- | :--- |
-| `node localize.js` | 启动本地可视化 Web 控制面板（`http://localhost:3388`） |
-| `node localize.js --now` | 立即全自动备份、解包、注入中文补丁并重打包部署 |
-| `node localize.js --restore` | 从安全备份 `app.asar.bak` 一键还原为官方纯英文原版 |
-| `node localize.js --auto-restore` | 官方更新后自动检查版本兼容性并安全恢复汉化 |
-| `node localize.js --check-status` | 查看当前客户端路径、版本号、备份状态与汉化状态 |
+| [`localize.js`](./localize.js) | 核心汉化引擎（内置 5,300+ 行中英词典、React 碎片拼接器、沙盒注入器与 CLI 入口） |
+| [`asar-tool.js`](./asar-tool.js) | 零依赖纯 Node.js 原生 `app.asar` 解包与重打包引擎（保留 `unpacked` 元数据） |
+| [`auto-restore.js`](./auto-restore.js) | 客户端版本匹配检测、原版备份防污染校验与原子级恢复模块 |
+| [`asar-version.js`](./asar-version.js) | 从 `app.asar` 头部安全读取客户端 `package.json` 版本号 |
+| [`process-check.js`](./process-check.js) | 跨平台（macOS / Windows / Linux）进程占用检测工具 |
+| [`app.asar.ready`](./app.asar.ready) | 预构建就绪的完整汉化包（供无 Node.js 环境用户直接覆盖安装） |
+| [`一键汉化.command`](./一键汉化.command) / [`还原英文原版.command`](./还原英文原版.command) | macOS 双击一键汉化 / 还原脚本 |
+| [`一键汉化.bat`](./一键汉化.bat) / [`还原英文原版.bat`](./还原英文原版.bat) | Windows 双击一键汉化 / 还原脚本 |
 
 ---
 
-## 🖥️ 可视化 Web 控制中心功能一览
+## ❓ 常见问题 (FAQ)
 
-启动 `双击运行汉化.command`（Mac）、`双击运行汉化.bat`（Windows）或 `运行汉化.sh` 后，浏览器会打开 `http://localhost:3388` 控制中心，提供以下一键操作：
-
-- **一键汉化**：自动关闭占用进程、创建原版备份并注入最新全量中文词库。
-- **还原英文原版**：毫秒级将软件恢复为官方纯英文状态。
-- **一键恢复（更新被覆盖后）**：当 Antigravity 自动更新导致界面变回英文时，顶部会亮起提醒横幅，点击即可恢复。
-- **启动应用 / 强制释放占用**：一键启动客户端，或强制清理后台残留的 `language_server` 锁文件进程。
-- **安全清理缓存**：清理临时渲染与 GPU 缓存（保留您的账号登录状态、历史对话与项目设置）。
-- **深色 / 浅色主题切换**：右上角随时切换控制面板外观。
+1. **为什么之前有些汉化工具只能汉化顶部菜单栏，主界面还是英文？**
+   - Antigravity 2.0 的 `BrowserWindow` 默认开启了 Electron 的 `sandbox: true` 沙盒模式，导致 `preload.js` 无法通过 `require('./i18n')` 加载外部脚本。本项目将自包含的 `DOM_TRANSLATOR_INJECTION` 引擎直接内联进 `preload.js` 并配合主世界 `executeJavaScript` 双重保障，彻底解决主界面不汉化的问题。
+2. **Antigravity 官方升级新版本后汉化失效了怎么办？**
+   - 官方升级会覆盖 `app.asar`。只需再次双击 **`一键汉化.command`**（macOS）或 **`一键汉化.bat`**（Windows），或运行 `node localize.js`，即可对新版本重新完成汉化。
+3. **汉化后会影响我的 Google 账号登录、对话记录或插件吗？**
+   - **完全不会**。本工具仅对界面展示文本与 DOM 渲染层进行本地化翻译，不触碰任何用户配置、凭证或网络通信。
 
 ---
 
-## ❓ 常见问题解答（FAQ）
+## 📄 开源协议与致谢
 
-### Q1：Antigravity 官方自动更新后，界面又变回英文了怎么办？
-官方升级时会用新版的英文 `app.asar` 覆盖本地文件。您只需要：
-- **Mac 用户**：再次双击一下 **`一键汉化.command`**；
-- **Windows 用户**：再次双击一下 **`一键更新汉化.bat`**（或打开控制面板点击「一键汉化」）；
-- **命令行用户**：运行一次 `node localize.js --now`。
-工具会自动用新版官方文件更新备份，并重新注入汉化补丁。
-
-### Q2：macOS 汉化后打开软件提示“Antigravity 已损坏，无法打开”怎么办？
-这是因为 macOS 的 Gatekeeper 检测到应用包内文件被修改。本项目的 `一键汉化.command` 和 `localize.js` 已内置自动修复逻辑；如果您是手动替换的文件，只需打开「终端」运行下面这一行命令即可解除拦截：
-```bash
-xattr -cr /Applications/Antigravity.app
-```
-
-### Q3：如何彻底卸载汉化、恢复官方原版？
-有三种方法任选其一：
-1. 在可视化控制中心（`http://localhost:3388`）点击 **「还原英文原版」**；
-2. 在终端运行 `node localize.js --restore`；
-3. 手动打开 `Resources` 目录，删除当前的 `app.asar`，把同目录下的备份文件 `app.asar.bak` 改名为 `app.asar` 即可。
-
----
-
-## 📂 项目目录结构
-
-```text
-Antigravity-ZH-CN/
-├── 一键汉化.command         # [macOS] Finder 双击一键静默汉化 + 签名修复 + 自动重启
-├── 双击运行汉化.command     # [macOS] Finder 双击启动可视化网页控制中心
-├── 运行汉化.sh              # [macOS/Linux] 终端启动可视化网页控制中心脚本
-├── 双击运行汉化.bat         # [Windows] 双击启动可视化网页控制中心脚本
-├── 一键更新汉化.bat         # [Windows] 官方更新后双击极速恢复汉化脚本
-├── localize.js             # 核心汉化引擎、5300+ 行词库、CLI 与本地控制中心服务
-├── asar-tool.js            # 纯 Node.js 零依赖 ASAR 解包/封包引擎 (保留 unpacked 索引)
-├── index.html              # 可视化 Web 控制中心前端界面 (支持深浅色主题)
-├── auto-restore.js         # 版本兼容性校验与官方更新后自动恢复模块
-├── package-installer.js    # SHA-256 原子化安装与失败自动回滚模块
-├── asar-version.js         # ASAR 包版本元数据安全读取器
-├── process-check.js        # 跨平台进程状态严格检测模块
-├── release-manager.js      # Release 版本检查与缓存管理模块
-└── package.json            # 项目配置与 npm scripts
-```
-
----
-
-## 📄 开源协议
-
-本项目基于 [MIT License](LICENSE) 开源。
+- 本项目基于 [MIT License](./package.json) 许可。
+- 灵感与部分词库架构致敬 [liominsb/Antigravity-Chinese-Localization](https://github.com/liominsb/Antigravity-Chinese-Localization)。

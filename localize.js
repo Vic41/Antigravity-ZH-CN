@@ -1,11 +1,7 @@
-const http = require('http');
-const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFileSync, spawn } = require('child_process');
-const { createReleaseManager } = require('./release-manager');
-const { createPackageInstaller } = require('./package-installer');
+const { execFileSync } = require('child_process');
 const { isAppRunningStrict } = require('./process-check');
 const { readAsarPackageVersion } = require('./asar-version');
 const { extractAsar, packAsar } = require('./asar-tool');
@@ -17,35 +13,12 @@ const {
 } = require('./auto-restore');
 
 const CURRENT_VERSION = '2.28.2';
-
-function compareVersions(v1, v2) {
-  const parse = (v) => (v || '').replace(/^[vV]/, '').split('.').map(n => parseInt(n, 10) || 0);
-  const p1 = parse(v1);
-  const p2 = parse(v2);
-  const maxLen = Math.max(p1.length, p2.length);
-  for (let i = 0; i < maxLen; i++) {
-    const a = p1[i] || 0;
-    const b = p2[i] || 0;
-    if (a > b) return 1;
-    if (a < b) return -1;
-  }
-  return 0;
-}
-
-const PORT = 3388;
 const WORKSPACE_DIR = __dirname;
 const EXTRACT_DIR = path.join(WORKSPACE_DIR, 'extracted');
-const releaseManager = createReleaseManager({ workspaceDir: WORKSPACE_DIR });
-const packageInstaller = createPackageInstaller({ workspaceDir: WORKSPACE_DIR, releaseManager, getAppDir,
-  getResourcesDir, isAppRunning: isAppRunningStrict, stopProcesses: killApp });
-
-let logs = [];
 
 function log(msg) {
   const time = new Date().toLocaleTimeString();
-  const formatted = `[${time}] ${msg}`;
-  logs.push(formatted);
-  console.log(formatted);
+  console.log(`[${time}] ${msg}`);
 }
 
 function sanitizeUsername(name) {
@@ -63,33 +36,6 @@ function getHostUsername() {
     if (info && info.username) return info.username;
   } catch (_) {}
   return process.env.USER || process.env.USERNAME || 'user';
-}
-
-function getAsarCmd() {
-  const majorVersion = parseInt(process.versions.node.split('.')[0], 10);
-  if (majorVersion >= 18) {
-    return 'npx -y @electron/asar';
-  } else {
-    return 'npx -y asar@3.2.0';
-  }
-}
-
-// Check if Antigravity processes are running (using execFileSync without shell)
-function isAppRunning() {
-  try {
-    if (process.platform === 'win32') {
-      const output = execFileSync('tasklist.exe', ['/FO', 'CSV', '/NH'], { encoding: 'utf-8', windowsHide: true }).toLowerCase();
-      return output.includes('"antigravity.exe"') || output.includes('"language_server.exe"');
-    } else if (process.platform === 'darwin') {
-      execFileSync('pgrep', ['-xi', 'antigravity|language_server'], { stdio: 'ignore' });
-      return true;
-    } else {
-      execFileSync('pgrep', ['-x', 'antigravity|language_server'], { stdio: 'ignore' });
-      return true;
-    }
-  } catch (e) {
-    return false;
-  }
 }
 
 // Kill Antigravity processes and its language_server background processes (using execFileSync without shell)
@@ -6830,7 +6776,6 @@ async function runLocalizationWorkflow(appDir, options = {}) {
   const backupPath = path.join(resourcesDir, 'app.asar.bak');
   const altCleanBackup = process.env.AGY_CLEAN_BACKUP_PATH || '';
 
-  logs = [];
   log('=================== 开始 Antigravity-ZH-CN 汉化流程 ===================');
   log(`目标程序目录: ${appDir}`);
 
@@ -6934,7 +6879,6 @@ function runRestoreWorkflow(appDir) {
   const asarPath = path.join(resourcesDir, 'app.asar');
   const backupPath = path.join(resourcesDir, 'app.asar.bak');
 
-  logs = [];
   log('=================== 开始还原流程 ===================');
   log(`目标程序目录: ${appDir}`);
   if (!fs.existsSync(backupPath)) {
@@ -6956,337 +6900,27 @@ function runRestoreWorkflow(appDir) {
   log('=================== 还原流程结束 ===================');
 }
 
-function isTrustedLocalOrigin(req) {
-  const origin = req.headers.origin;
-  if (!origin) return true;
-  try {
-    const parsed = new URL(origin);
-    return (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '[::1]') &&
-           parsed.port === String(PORT);
-  } catch (_) {
-    return false;
-  }
-}
+const KNOWN_CLI_FLAGS = [
+  '--now',
+  '--restore',
+  '--auto-restore',
+  '--check-status',
+  '--clean-cache',
+  '--apply-only',
+  '--no-kill'
+];
 
-function readBoundedJsonBody(req, maxBytes = 16384) {
-  return new Promise((resolve, reject) => {
-    let size = 0;
-    const chunks = [];
-    req.on('data', (chunk) => {
-      size += chunk.length;
-      if (size > maxBytes) {
-        req.destroy();
-        reject(new Error('请求正文过大'));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => {
-      try {
-        const raw = Buffer.concat(chunks).toString('utf8');
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch (e) {
-        reject(new Error('请求正文不是有效的 JSON'));
-      }
-    });
-    req.on('error', reject);
-  });
-}
-
-const server = http.createServer((req, res) => {
-  // Security Headers & Strict Localhost Origin Policy
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  if (!isTrustedLocalOrigin(req)) {
-    res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ success: false, error: '拒绝跨站请求：仅允许本机控制中心访问' }));
-    return;
-  }
-  if (req.headers.origin) {
-    res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
-    res.setHeader('Vary', 'Origin');
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
-
-  // API routing
-  if (releaseManager.handleRequest(req, res)) return;
-  if (packageInstaller.handleRequest(req, res)) return;
-
-  if (req.url.startsWith('/api/status') && req.method === 'GET') {
-    const urlObj = new URL(req.url, `http://${req.headers.host}`);
-    const username = urlObj.searchParams.get('username') || '';
-    const useDefault = urlObj.searchParams.get('useDefault') !== 'false';
-    const customPath = urlObj.searchParams.get('customPath') || '';
-
-    const appDir = getAppDir(username, useDefault, customPath);
-    const resourcesDir = getResourcesDir(appDir);
-    const asarPath = path.join(resourcesDir, 'app.asar');
-    const backupPath = path.join(resourcesDir, 'app.asar.bak');
-
-    const isInstalled = fs.existsSync(asarPath);
-    const hasBackup = fs.existsSync(backupPath) && !isLocalizedAsar(backupPath);
-    const isRunning = isAppRunning();
-    const installedPackageVersion = isInstalled ? readAsarPackageVersion(asarPath) : null;
-    const isLocalized = isInstalled && isLocalizedAsar(asarPath);
-    const isUpdateOverwritten = Boolean(isInstalled && !isLocalized);
-
-    findAvailablePatch({ workspaceDir: WORKSPACE_DIR, targetVersion: installedPackageVersion, releaseManager })
-      .then(patch => {
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({
-          isInstalled,
-          hasBackup,
-          isRunning,
-          asarPath,
-          backupPath,
-          platform: process.platform,
-          defaultUsername: getHostUsername(),
-          currentVersion: CURRENT_VERSION,
-          installedPackageVersion,
-          isLocalized,
-          isUpdateOverwritten,
-          patchAvailable: Boolean(patch),
-          patchVersion: patch ? patch.version : null,
-          patchIsMatch: patch ? patch.isMatch : false
-        }));
-      })
-      .catch(() => {
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({
-          isInstalled,
-          hasBackup,
-          isRunning,
-          asarPath,
-          backupPath,
-          platform: process.platform,
-          defaultUsername: getHostUsername(),
-          currentVersion: CURRENT_VERSION,
-          installedPackageVersion,
-          isLocalized,
-          isUpdateOverwritten,
-          patchAvailable: false,
-          patchVersion: null,
-          patchIsMatch: false
-        }));
-      });
-  }
-  else if (req.url === '/api/auto-restore' && req.method === 'POST') {
-    readBoundedJsonBody(req).then(async (params) => {
-      try {
-        const appDir = getAppDir(params.username, params.useDefault, params.customPath);
-        const result = await executeAutoRestore({
-          appDir,
-          getResourcesDir,
-          workspaceDir: WORKSPACE_DIR,
-          releaseManager,
-          isAppRunning: isAppRunningStrict,
-          stopProcesses: killApp,
-          forceStop: params.forceStop !== false
-        });
-        log(result.message);
-        if (result.success) {
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: true, result, logs }));
-        } else {
-          const status = result.code === 'VERSION_MISMATCH' ? 409 : 400;
-          res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: false, error: result.message, result, logs }));
-        }
-      } catch (err) {
-        log(`自动恢复流程异常: ${err.message}`);
-        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: false, error: err.message, logs }));
-      }
-    }).catch((e) => {
-      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: false, error: e.message, logs }));
-    });
-  } 
-  else if (req.url === '/api/localize' && req.method === 'POST') {
-    readBoundedJsonBody(req).then((params) => {
-      const appDir = getAppDir(params.username, params.useDefault, params.customPath);
-      return runLocalizationWorkflow(appDir);
-    }).then(() => {
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: true, logs }));
-    }).catch((err) => {
-      log(`汉化流程失败: ${err.message}`);
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: false, error: err.message, logs }));
-    });
-  } 
-  else if (req.url === '/api/restore' && req.method === 'POST') {
-    readBoundedJsonBody(req).then((params) => {
-      const appDir = getAppDir(params.username, params.useDefault, params.customPath);
-      runRestoreWorkflow(appDir);
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: true, logs }));
-    }).catch((err) => {
-      log(`恢复流程失败: ${err.message}`);
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: false, error: err.message, logs }));
-    });
-  } 
-  else if (req.url === '/api/launch' && req.method === 'POST') {
-    readBoundedJsonBody(req).then((params) => {
-      const appDir = getAppDir(params.username, params.useDefault, params.customPath);
-      if (process.platform === 'darwin') {
-        const match = appDir.match(/^.*\.app/);
-        const appBundlePath = match ? match[0] : appDir;
-        log(`正在尝试启动 Antigravity 2.0 (macOS: open -a ${appBundlePath})...`);
-        spawn('open', ['-a', appBundlePath], { detached: true, stdio: 'ignore' }).unref();
-        log('Antigravity 2.0 启动指令已发送。');
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: true, logs }));
-      } else {
-        const exeName = process.platform === 'win32' ? 'Antigravity.exe' : 'antigravity';
-        const appPath = path.join(appDir, exeName);
-        log(`正在尝试启动 Antigravity 2.0 (路径: ${appPath})...`);
-        if (fs.existsSync(appPath)) {
-          spawn(appPath, [], { detached: true, stdio: 'ignore' }).unref();
-          log('Antigravity 2.0 启动指令已发送。');
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: true, logs }));
-        } else {
-          res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: false, error: '未找到可执行程序: ' + appPath, logs }));
-        }
-      }
-    }).catch((e) => {
-      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: false, error: '请求解析失败: ' + e.message, logs }));
-    });
-  }
-  else if (req.url === '/api/kill' && req.method === 'POST') {
-    try {
-      killApp();
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: true, logs }));
-    } catch (e) {
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: false, error: e.message, logs }));
-    }
-  }
-  else if (req.url === '/api/clean-cache' && req.method === 'POST') {
-    readBoundedJsonBody(req).then((params) => {
-      const count = cleanAppCache(params.username);
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: true, cleanedCount: count, logs }));
-    }).catch((e) => {
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: false, error: e.message, logs }));
-    });
-  }
-  else if (req.url === '/api/logs' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ logs }));
-  }
-  else if (req.url === '/api/check-release' && req.method === 'GET') {
-    const options = {
-      hostname: 'api.github.com',
-      path: `/repos/${process.env.AGY_ZH_REPO || 'Vic41/Antigravity-ZH-CN'}/releases/latest`,
-      headers: {
-        'User-Agent': 'Antigravity-ZH-CN-Console'
-      },
-      timeout: 8000
-    };
-
-    const ghReq = https.get(options, (ghRes) => {
-      let data = '';
-      ghRes.on('data', chunk => { data += chunk; });
-      ghRes.on('end', () => {
-        try {
-          if (ghRes.statusCode >= 200 && ghRes.statusCode < 300) {
-            const release = JSON.parse(data);
-            const latestTag = release.tag_name || '';
-            const cleanLatest = latestTag.replace(/^[vV]/, '');
-            const hasUpdate = compareVersions(cleanLatest, CURRENT_VERSION) > 0;
-            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-            res.end(JSON.stringify({
-              success: true,
-              currentVersion: CURRENT_VERSION,
-              latestVersion: cleanLatest,
-              hasUpdate,
-              releaseName: release.name || latestTag,
-              releaseUrl: release.html_url,
-              publishedAt: release.published_at,
-              body: release.body || ''
-            }));
-          } else {
-            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-            res.end(JSON.stringify({
-              success: false,
-              currentVersion: CURRENT_VERSION,
-              error: `GitHub API 响应异常 (HTTP ${ghRes.statusCode})`
-            }));
-          }
-        } catch (err) {
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({
-            success: false,
-            currentVersion: CURRENT_VERSION,
-            error: '解析 GitHub Release 数据失败: ' + err.message
-          }));
-        }
-      });
-    });
-
-    ghReq.on('error', (err) => {
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({
-        success: false,
-        currentVersion: CURRENT_VERSION,
-        error: '连接 GitHub 失败: ' + err.message
-      }));
-    });
-
-    ghReq.on('timeout', () => {
-      ghReq.destroy();
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({
-        success: false,
-        currentVersion: CURRENT_VERSION,
-        error: '请求 GitHub API 超时 (网络连接受限)'
-      }));
-    });
-  }
-  // Serve the dashboard
-  else if (req.url === '/' || req.url === '/index.html') {
-    const indexPath = path.join(WORKSPACE_DIR, 'index.html');
-    if (fs.existsSync(indexPath)) {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(fs.readFileSync(indexPath));
-    } else {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('index.html not found.');
-    }
-  } 
-  else {
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('Not Found');
-  }
-});
-
-// 命令行参数白名单校验（issue #40）
-// 此前未识别的参数（例如旧文档里记载的 --restore / --extract-only / --pack-only）
-// 会静默落入下方的 Web 面板分支并占住端口，命令看起来"执行成功"，实际什么都没做。
-const KNOWN_CLI_FLAGS = ['--apply-only', '--auto-restore', '--check-status', '--now', '--restore', '--no-kill'];
 const unknownCliFlags = process.argv
   .slice(2)
   .filter((arg) => arg.startsWith('--') && arg.length > 2 && !KNOWN_CLI_FLAGS.includes(arg));
+
 if (unknownCliFlags.length > 0) {
   console.error(`[参数错误] 未识别的命令行参数: ${unknownCliFlags.join(', ')}`);
   console.error(`可用参数: ${KNOWN_CLI_FLAGS.join(' | ')}`);
-  console.error('如需启动 Web 管理面板，请不带任何参数运行: node localize.js');
   process.exit(1);
 }
+
+const defaultAppDir = getAppDir(getHostUsername(), true, process.env.AGY_APP_DIR || '');
 
 if (process.argv.includes('--apply-only')) {
   try {
@@ -7297,22 +6931,18 @@ if (process.argv.includes('--apply-only')) {
     console.error('[失败] 汉化注入失败:', err.message);
     process.exit(1);
   }
-}
-
-if (process.argv.includes('--auto-restore')) {
+} else if (process.argv.includes('--auto-restore')) {
   (async () => {
     console.log('=======================================================');
     console.log('  Antigravity 2.0 汉化自动恢复程序 (官方更新后自动检查)');
     console.log('=======================================================\n');
-    const defaultAppDir = getAppDir(getHostUsername(), true, '');
     const result = await executeAutoRestore({
       appDir: defaultAppDir,
       getResourcesDir,
       workspaceDir: WORKSPACE_DIR,
-      releaseManager,
       isAppRunning: isAppRunningStrict,
       stopProcesses: killApp,
-      forceStop: true
+      forceStop: !process.argv.includes('--no-kill')
     });
     console.log(result.message);
     if (result.success) {
@@ -7324,7 +6954,7 @@ if (process.argv.includes('--auto-restore')) {
       process.exit(0);
     } else {
       if (result.code === 'VERSION_MISMATCH') {
-        console.error('\n[版本警告] 发现官方版本更新，本地暂无兼容补丁。');
+        console.error('\n[版本警告] 发现官方版本更新，本地暂无同版本预打包补丁，建议直接运行 node localize.js 重新打包汉化。');
         process.exit(2);
       } else {
         console.error('\n[失败] 自动恢复汉化未能完成。');
@@ -7337,18 +6967,24 @@ if (process.argv.includes('--auto-restore')) {
   });
 } else if (process.argv.includes('--check-status')) {
   (async () => {
-    const defaultAppDir = getAppDir(getHostUsername(), true, '');
     const status = await checkClientStatus({ appDir: defaultAppDir, getResourcesDir });
-    const patch = await findAvailablePatch({ workspaceDir: WORKSPACE_DIR, targetVersion: status.appVersion, releaseManager });
-    console.log(JSON.stringify({ status, patch }, null, 2));
+    const patch = await findAvailablePatch({ workspaceDir: WORKSPACE_DIR, targetVersion: status.appVersion });
+    console.log(JSON.stringify({ status, patch, currentVersion: CURRENT_VERSION }, null, 2));
     process.exit(0);
   })().catch(err => {
     console.error('[异常]', err.message);
     process.exit(1);
   });
+} else if (process.argv.includes('--clean-cache')) {
+  try {
+    cleanAppCache(getHostUsername());
+    process.exit(0);
+  } catch (err) {
+    console.error('[失败] 清理缓存出错:', err.message);
+    process.exit(1);
+  }
 } else if (process.argv.includes('--restore')) {
   try {
-    const defaultAppDir = getAppDir(getHostUsername(), true, '');
     runRestoreWorkflow(defaultAppDir);
     console.log('[成功] 已还原为官方英文原版！');
     process.exit(0);
@@ -7356,8 +6992,8 @@ if (process.argv.includes('--auto-restore')) {
     console.error('[失败] 还原出错:', err.message);
     process.exit(1);
   }
-} else if (process.argv.includes('--now')) {
-  const defaultAppDir = getAppDir(getHostUsername(), true, '');
+} else {
+  // 默认行为（不带参数或带 --now）：直接执行一键汉化流程
   runLocalizationWorkflow(defaultAppDir)
     .then(() => {
       console.log('[成功] 汉化打包部署成功！');
@@ -7367,33 +7003,4 @@ if (process.argv.includes('--auto-restore')) {
       console.error('[失败] 汉化出错:', err.message);
       process.exit(1);
     });
-} else {
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.log(`\n======================================================`);
-      console.log(` [提示] Antigravity 2.0 汉化服务已经在运行中！(端口 ${PORT})`);
-      console.log(` 本地管理面板: http://localhost:${PORT}`);
-      console.log(`======================================================\n`);
-    } else {
-      console.error('服务启动异常:', err.message);
-    }
-  });
-
-  server.listen(PORT, '127.0.0.1', async () => {
-    console.log(`\n======================================================`);
-    console.log(` Antigravity 2.0 汉化服务已在后台运行！`);
-    console.log(` 本地管理面板: http://localhost:${PORT}`);
-    console.log(`======================================================\n`);
-    try {
-      const defaultAppDir = getAppDir(getHostUsername(), true, '');
-      const status = await checkClientStatus({ appDir: defaultAppDir, getResourcesDir });
-      if (status.isInstalled) {
-        if (status.isUpdateOverwritten) {
-          log(`[状态检查] 检测到客户端已更新或处于原版状态 (v${status.appVersion || '未知'})，汉化尚未应用。`);
-        } else {
-          log(`[状态检查] 客户端已处于汉化状态 (v${status.appVersion || '未知'})。`);
-        }
-      }
-    } catch (_) {}
-  });
 }
