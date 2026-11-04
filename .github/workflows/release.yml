@@ -101,9 +101,10 @@ jobs:
           TAG: ${{ steps.pkg.outputs.version }}
           AGY_VER: ${{ steps.pkg.outputs.agy_version }}
         run: |
-          TITLE="${TAG} - Antigravity 一键深度汉化包（适配官方 ${AGY_VER}）"
+          TITLE="${TAG}"
           MAC_ZIP="release-assets/Antigravity-ZH-CN-${TAG}-macOS.zip"
           WIN_ZIP="release-assets/Antigravity-ZH-CN-${TAG}-Windows.zip"
+          gh release edit v0.0.1 --repo "${GITHUB_REPOSITORY}" --title "v0.0.1" >/dev/null 2>&1 || true
 
           cat <<EOF > release-notes.md
           ### 📥 小白一键汉化下载指南（请根据您的电脑系统点击下方对应压缩包下载）
