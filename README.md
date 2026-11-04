@@ -32,15 +32,14 @@
 
 ## 🚀 外部用户使用指南（3 步极简上手）
 
-### 第一步：下载本项目
+### 第一步：前往 Releases 下载对应系统的压缩包
 
-- **方式 A（直接下载压缩包，适合所有用户）**：
-  点击本仓库右上角绿色的 **`<> Code`** 按钮 ➔ 选择 **`Download ZIP`**，下载后解压到电脑任意文件夹。
-- **方式 B（Git 克隆）**：
-  ```bash
-  git clone https://github.com/Vic41/Antigravity-ZH-CN.git
-  cd Antigravity-ZH-CN
-  ```
+点击本仓库右侧的 **[Releases（发布页）](https://github.com/Vic41/Antigravity-ZH-CN/releases)**，在最新版本下方的 **Assets** 中根据您的系统下载：
+
+- 🍎 **苹果电脑 (macOS)**：点击下载 **`Antigravity-ZH-CN-v0.0.1-macOS.zip`** 并解压
+- 🪟 **Windows 电脑**：点击下载 **`Antigravity-ZH-CN-v0.0.1-Windows.zip`** 并解压
+
+> *(注：请直接下载带 `-macOS.zip` 或 `-Windows.zip` 后缀的专用包，里面只包含您当前系统需要的双击脚本，无需下载 `Source code`。)*
 
 ---
 
