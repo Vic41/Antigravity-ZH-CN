@@ -38,7 +38,7 @@ set "APP_EXE=%LOCALAPPDATA%\Programs\antigravity\Antigravity.exe"
 if not exist "%TARGET_DIR%\app.asar.bak" goto :missing_backup
 if not exist "%TARGET_DIR%\app.asar" goto :do_restore
 
-findstr /C:"Antigravity 2.0 Chinese Localization Engine" "%TARGET_DIR%\app.asar" >nul 2>nul
+powershell -NoProfile -Command "$raw = [IO.File]::ReadAllText($env:TARGET_DIR + '\app.asar'); if ($raw.Contains('Antigravity 2.0 Chinese Localization Engine')) { exit 0 } else { exit 1 }" >nul 2>nul
 if errorlevel 1 goto :already_clean
 
 :do_restore

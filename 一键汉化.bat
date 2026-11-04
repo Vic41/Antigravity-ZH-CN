@@ -48,7 +48,7 @@ if exist "%CORE_DIR%\READY_VERSION" set /p READY_VER=<"%CORE_DIR%\READY_VERSION"
 if defined READY_VER set "READY_VER=%READY_VER: =%"
 if not defined READY_VER goto :after_ver_check
 
-findstr /C:"\"version\": \"%READY_VER%\"" "%TARGET_DIR%\app.asar" >nul 2>nul
+powershell -NoProfile -Command "$raw = [IO.File]::ReadAllText($env:TARGET_DIR + '\app.asar'); if ($raw -match ('\x22version\x22\s*:\s*\x22' + [regex]::Escape($env:READY_VER.Trim()) + '\x22')) { exit 0 } else { exit 1 }" >nul 2>nul
 if errorlevel 1 goto :version_mismatch
 
 :after_ver_check
@@ -57,7 +57,7 @@ taskkill /F /IM language_server.exe >nul 2>nul
 if not "%AGY_BATCH_NOPAUSE%"=="1" timeout /t 2 /nobreak >nul
 
 if exist "%TARGET_DIR%\app.asar.bak" goto :do_deploy
-findstr /C:"Antigravity 2.0 Chinese Localization Engine" "%TARGET_DIR%\app.asar" >nul 2>nul
+powershell -NoProfile -Command "$raw = [IO.File]::ReadAllText($env:TARGET_DIR + '\app.asar'); if ($raw.Contains('Antigravity 2.0 Chinese Localization Engine')) { exit 0 } else { exit 1 }" >nul 2>nul
 if not errorlevel 1 goto :skip_polluted_backup
 
 copy /Y "%TARGET_DIR%\app.asar" "%TARGET_DIR%\app.asar.bak" >nul
