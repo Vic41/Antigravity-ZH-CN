@@ -16,10 +16,16 @@ permissions:
 jobs:
   release:
     name: Package macOS & Windows Release ZIPs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git init .
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "${GITHUB_SHA}"
+          git checkout -f FETCH_HEAD
 
       - name: Build Separate macOS & Windows ZIP Packages
         id: pkg
@@ -78,22 +84,46 @@ jobs:
           ls -lh "${MAC_PKG}.zip" "${WIN_PKG}.zip"
 
       - name: Publish GitHub Release with Platform Packages
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.pkg.outputs.version }}
-          name: "${{ steps.pkg.outputs.version }} - Antigravity 一键深度汉化包（适配官方 ${{ steps.pkg.outputs.agy_version }}）"
-          draft: false
-          prerelease: false
-          make_latest: "true"
-          body: |
-            ### 📥 小白一键汉化下载指南（请根据您的电脑系统点击下方对应压缩包下载）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.pkg.outputs.version }}
+          AGY_VER: ${{ steps.pkg.outputs.agy_version }}
+        run: |
+          TITLE="${TAG} - Antigravity 一键深度汉化包（适配官方 ${AGY_VER}）"
+          MAC_ZIP="release-assets/Antigravity-ZH-CN-${TAG}-macOS.zip"
+          WIN_ZIP="release-assets/Antigravity-ZH-CN-${TAG}-Windows.zip"
 
-            | 您的电脑系统 | 第 1 步：点击下方 Assets 下载 | 第 2 步：解压后直接双击 |
-            | :--- | :--- | :--- |
-            | 🍎 **苹果电脑 (macOS)** | **`Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-macOS.zip`** | 双击 **`一键汉化.command`** 完成汉化；双击 **`一键还原.command`** 恢复默认英文 |
-            | 🪟 **Windows 电脑** | **`Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-Windows.zip`** | 双击 **`一键汉化.bat`** 完成汉化；双击 **`一键还原.bat`** 恢复默认英文 |
+          cat <<EOF > release-notes.md
+          ### 📥 小白一键汉化下载指南（请根据您的电脑系统点击下方对应压缩包下载）
 
-            > 💡 **提示**：每个压缩包内均已包含完整的中文汉化包与自动安装引擎，下载解压后直接双击 **`一键汉化`** 或 **`一键还原`** 即可，无需安装任何编程环境！
-          files: |
-            release-assets/Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-macOS.zip
-            release-assets/Antigravity-ZH-CN-${{ steps.pkg.outputs.version }}-Windows.zip
+          | 您的电脑系统 | 第 1 步：点击下方 Assets 下载 | 第 2 步：解压后直接双击 |
+          | :--- | :--- | :--- |
+          | 🍎 **苹果电脑 (macOS)** | **\`Antigravity-ZH-CN-${TAG}-macOS.zip\`** | 双击 **\`一键汉化.command\`** 完成汉化；双击 **\`一键还原.command\`** 恢复默认英文 |
+          | 🪟 **Windows 电脑** | **\`Antigravity-ZH-CN-${TAG}-Windows.zip\`** | 双击 **\`一键汉化.bat\`** 完成汉化；双击 **\`一键还原.bat\`** 恢复默认英文 |
+
+          > 💡 **提示**：每个压缩包内均已包含完整的中文汉化包与自动安装引擎，下载解压后直接双击 **\`一键汉化\`** 或 **\`一键还原\`** 即可，无需安装任何编程环境！
+          EOF
+          sed -i 's/^          //' release-notes.md
+
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release edit "${TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${TITLE}" \
+              --notes-file release-notes.md \
+              --latest
+            for attempt in 1 2 3; do
+              if gh release upload "${TAG}" "${MAC_ZIP}" "${WIN_ZIP}" --clobber --repo "${GITHUB_REPOSITORY}"; then
+                break
+              fi
+              echo "Upload attempt ${attempt} failed, retrying in 3s..."
+              sleep 3
+            done
+          else
+            gh release create "${TAG}" "${MAC_ZIP}" "${WIN_ZIP}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${GITHUB_SHA}" \
+              --title "${TITLE}" \
+              --notes-file release-notes.md \
+              --latest
+          fi
+          rm -f release-notes.md
