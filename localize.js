@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -50,8 +51,8 @@ function killApp() {
       try { execFileSync('pkill', ['-xi', 'antigravity'], { stdio: 'ignore' }); } catch (e) {}
       try { execFileSync('pkill', ['-xi', 'language_server'], { stdio: 'ignore' }); } catch (e) {}
     } else {
-      try { execFileSync('pkill', ['-x', 'antigravity'], { stdio: 'ignore' }); } catch (e) {}
-      try { execFileSync('pkill', ['-x', 'language_server'], { stdio: 'ignore' }); } catch (e) {}
+      try { execFileSync('pkill', ['-xi', 'antigravity'], { stdio: 'ignore' }); } catch (e) {}
+      try { execFileSync('pkill', ['-xi', 'language_server'], { stdio: 'ignore' }); } catch (e) {}
     }
     log('已成功强制解除 Antigravity 及其语言服务器进程占用！');
   } catch (e) {
@@ -155,6 +156,10 @@ function getResourcesDir(appDir) {
 const DOM_TRANSLATOR_INJECTION = `
 // Antigravity 2.0 Chinese Localization Engine Enhanced
 (function() {
+  if (typeof window !== 'undefined') {
+    if (window.__AGY_ZH_CN_LOADED__) return;
+    window.__AGY_ZH_CN_LOADED__ = true;
+  }
   const dictionary = {
     // Top Bar & Menus
     "File": "文件",
@@ -413,7 +418,6 @@ const DOM_TRANSLATOR_INJECTION = `
     "You can always change your choices in Settings.": "你可以随时在设置中更改你的选择。",
     "You can always change your choices in Settings": "你可以随时在设置中更改你的选择",
     "Plugins are packaged collections of skills and MCPs to help the Agent in": "插件是技能和 MCP 的打包集合，用于协助智能体在",
-    "Plugins are packaged collections of skills and MCPs to help the Agent in ": "插件是技能和 MCP 的打包集合，用于协助智能体在 ",
     "Antigravity work with Google developer products. You can always change your choices in Settings.": "Antigravity 中协同 Google 开发者产品工作。你可以随时在设置中更改你的选择。",
     "Antigravity work with Google developer products. You can always change your choices in Settings": "Antigravity 中协同 Google 开发者产品工作。你可以随时在设置中更改你的选择",
     "Antigravity work with Google developer products.": "Antigravity 中协同 Google 开发者产品工作。",
@@ -629,13 +633,9 @@ const DOM_TRANSLATOR_INJECTION = `
     "Type / and 选择 'plan' to have the agent generate a plan.": "输入 / 并选择 'plan' 来让智能体生成计划。",
     "Type / and 选择 'plan' to have the agent generate a plan": "输入 / 并选择 'plan' 来让智能体生成计划",
     "Type / and": "输入 / 并",
-    "Type / and ": "输入 / 并 ",
     "Type / and select": "输入 / 并选择",
-    "Type / and select ": "输入 / 并选择 ",
     "Type / and 选择": "输入 / 并选择",
-    "Type / and 选择 ": "输入 / 并选择 ",
     "Type /": "输入 /",
-    "Type / ": "输入 / ",
     "to have the agent generate a plan.": "来让智能体生成计划。",
     "to have the agent generate a plan": "来让智能体生成计划",
     "have the agent generate a plan.": "让智能体生成计划。",
@@ -1887,7 +1887,7 @@ const DOM_TRANSLATOR_INJECTION = `
     "Failed to display native context menu:": "无法显示原生上下文菜单：",
     "Failed to load media": "加载媒体资源失败",
     "Failed to parse settings. Fix and restart.": "设置解析失败，请修正后重启软件。",
-    "Failed to save image: ": "保存图片失败：",
+    "Failed to save image:": "保存图片失败：",
     "Loading media...": "正在加载媒体...",
     "More info": "更多信息",
     "No documents": "暂无文档",
@@ -4695,7 +4695,7 @@ const DOM_TRANSLATOR_INJECTION = `
     "policy": "策略", "policies": "策略", "never": "从不", "always": "总是",
     "changed": "已更改", "review": "审核", "reviewing": "审核中", "reviewed": "已审核",
     "canceled": "已取消",
-    "explore": "探索", "search": "搜索", "change": "更改", "changes": "更改",
+    "explore": "探索", "change": "更改", "changes": "更改",
     "turn": "回合", "turns": "回合",
     "analyzed": "分析", "analyzing": "分析",
     "advanced": "高级", "collapse": "折叠", "expand": "展开",
@@ -4703,7 +4703,6 @@ const DOM_TRANSLATOR_INJECTION = `
     "wsl": "WSL", "distro": "发行版", "distros": "发行版"
   };
 
-  const combinedDict = Object.assign({}, coreWords, dictionary);
   // 性能优化 1：预先构建全小写字典 Map，将未命中小写查找由 O(N) 降低为 O(1)
   const lowerDictionary = new Map();
   for (const k in dictionary) {
@@ -4715,6 +4714,13 @@ const DOM_TRANSLATOR_INJECTION = `
 
   const stringCache = new Map();
   const MAX_STRING_CACHE = 5000;
+
+  function cacheAndReplace(rawText, trimmedKey, translatedVal) {
+    if (stringCache.size < MAX_STRING_CACHE) {
+      stringCache.set(trimmedKey, translatedVal);
+    }
+    return rawText.replace(trimmedKey, () => translatedVal);
+  }
 
   const escapeRegExp = (str) => {
     const specials = ['[', ']', '(', ')', '{', '}', '*', '+', '?', '.', '^', '$', '|', '\\\\'];
@@ -4740,7 +4746,13 @@ const DOM_TRANSLATOR_INJECTION = `
 
     // 0. 极速缓存查询（O(1) 命中瞬间返回）
     if (stringCache.has(trimmed)) {
-      return text.replace(trimmed, stringCache.get(trimmed));
+      const cached = stringCache.get(trimmed);
+      return text.replace(trimmed, () => cached);
+    }
+
+    // 0.1 词典 O(1) 精确命中前置，避免对已知静态文案执行 100+ 条动态正则
+    if (Object.prototype.hasOwnProperty.call(dictionary, trimmed)) {
+      return cacheAndReplace(text, trimmed, dictionary[trimmed]);
     }
 
     // ===== 2.21.0 专属动态模式匹配与防御 =====
@@ -4993,18 +5005,6 @@ const DOM_TRANSLATOR_INJECTION = `
 
     if (/^Running\\s+(\\d+)\\s+commands?$/i.test(trimmed)) {
       const fixed = trimmed.replace(/^Running\\s+(\\d+)\\s+commands?$/i, '正在运行 $1 条命令');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
-      return text.replace(trimmed, fixed);
-    }
-
-    if (/^Ran\\s+(\\d+)\\s+command$/i.test(trimmed)) {
-      const fixed = trimmed.replace(/^Ran\\s+(\\d+)\\s+command$/i, '已运行 $1 条命令');
-      if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
-      return text.replace(trimmed, fixed);
-    }
-
-    if (/^Running\\s+(\\d+)\\s+command$/i.test(trimmed)) {
-      const fixed = trimmed.replace(/^Running\\s+(\\d+)\\s+command$/i, '正在运行 $1 条命令');
       if (stringCache.size < MAX_STRING_CACHE) stringCache.set(trimmed, fixed);
       return text.replace(trimmed, fixed);
     }
@@ -5622,10 +5622,6 @@ const DOM_TRANSLATOR_INJECTION = `
       dynamicMatch = dynamicMatch.replace(/^Tool is running as a background task with task id: (.+)$/i, '工具正在后台运行 (任务ID: $1)');
       isDynamic = true;
     }
-    if (/^Thought (?:for|持续) (.+)$/i.test(trimmed)) {
-      dynamicMatch = dynamicMatch.replace(/^Thought (?:for|持续) (.+)$/i, '思考了 $1');
-      isDynamic = true;
-    }
     if (/^Thinking (?:for|持续) (.+)$/i.test(trimmed)) {
       dynamicMatch = dynamicMatch.replace(/^Thinking (?:for|持续) (.+)$/i, '思考了 $1');
       isDynamic = true;
@@ -5685,20 +5681,24 @@ const DOM_TRANSLATOR_INJECTION = `
         (_m, v) => '智能体权限预设选择器，当前：' + v.replace(/Turbo/gi, '极速模式'));
       isDynamic = true;
     }
+    if (/^Failed to save image:\\s*(.+)$/i.test(trimmed)) {
+      dynamicMatch = trimmed.replace(/^Failed to save image:\\s*(.+)$/i, (_m, v) => '保存图片失败：' + v);
+      isDynamic = true;
+    }
     if (isDynamic) {
-      return text.replace(trimmed, dynamicMatch);
+      return cacheAndReplace(text, trimmed, dynamicMatch);
     }
     // --- End Dynamic Regex ---
 
     // 1. Direct Literal Match (Exact match including punctuation)
     if (dictionary[trimmed]) {
-      return text.replace(trimmed, dictionary[trimmed]);
+      return cacheAndReplace(text, trimmed, dictionary[trimmed]);
     }
 
     // Normalizing internal multiple whitespace/newlines for multi-sentence cards
     const normalizedSpace = trimmed.replace(/\\s+/g, ' ');
     if (dictionary[normalizedSpace]) {
-      return text.replace(trimmed, dictionary[normalizedSpace]);
+      return cacheAndReplace(text, trimmed, dictionary[normalizedSpace]);
     }
     
     // 性能：大小写不敏感匹配改用预先构建的 O(1) 索引 lowerDictionary，
@@ -5706,7 +5706,7 @@ const DOM_TRANSLATOR_INJECTION = `
     // 但避免了每次未命中都要线性扫描两千余条词典。
     const caseInsensitiveHit = lowerDictionary.get(trimmed.toLowerCase());
     if (caseInsensitiveHit !== undefined) {
-      return text.replace(trimmed, caseInsensitiveHit);
+      return cacheAndReplace(text, trimmed, caseInsensitiveHit);
     }
 
     // 2. Intelligent Punctuation Stripping & Reconstruction
@@ -5737,7 +5737,7 @@ const DOM_TRANSLATOR_INJECTION = `
     const coreTranslated = dictionary[core] || lowerDictionary.get(core.toLowerCase()) || '';
 
     if (coreTranslated) {
-      return text.replace(trimmed, coreTranslated + trailPunc);
+      return cacheAndReplace(text, trimmed, coreTranslated + trailPunc);
     }
 
     // 3. Fallback to word-by-word ONLY for short strings (<= 3 words)
@@ -6380,7 +6380,7 @@ function replaceInFile(filePath, target, replacement) {
     throw new Error(`找不到要修改的文件: ${filePath}`);
   }
   let content = fs.readFileSync(filePath, 'utf-8');
-  if (!content.includes(target)) {
+  if ((replacement.includes(target) && content.includes(replacement)) || !content.includes(target)) {
     if (content.includes(replacement)) {
       log(`文件 ${path.basename(filePath)} 已经应用过此汉化修改，跳过。`);
     } else {
@@ -6789,12 +6789,14 @@ async function runLocalizationWorkflow(appDir, options = {}) {
     killApp();
   }
 
-  // 2. Backup app.asar (prefer clean official backup if available)
+  // 2. Backup app.asar (prefer clean official backup if available, and detect official client upgrades)
+  const currentAsarLocalized = isLocalizedAsar(asarPath);
+  const currentAsarVersion = readAsarPackageVersion(asarPath);
   if (!fs.existsSync(backupPath) && fs.existsSync(altCleanBackup) && !isLocalizedAsar(altCleanBackup)) {
     fs.copyFileSync(altCleanBackup, backupPath);
     log('已从外部备份同步官方原版备份到: ' + backupPath);
   } else if (!fs.existsSync(backupPath)) {
-    if (isLocalizedAsar(asarPath)) {
+    if (currentAsarLocalized) {
       log('提示：当前系统 app.asar 已包含汉化代码，跳过自动备份以避免污染官方原版备份。');
     } else {
       log('正在创建 app.asar 的初始安全备份...');
@@ -6810,7 +6812,18 @@ async function runLocalizationWorkflow(appDir, options = {}) {
         log('警告：检测到备份文件 app.asar.bak 已被汉化包污染！');
       }
     } else {
-      log('安全备份已存在且为官方原版，跳过备份。备份文件: ' + backupPath);
+      const backupVersion = readAsarPackageVersion(backupPath);
+      if (!currentAsarLocalized && currentAsarVersion && backupVersion && currentAsarVersion !== backupVersion) {
+        const archivedName = `app.asar.bak.${backupVersion}.${Date.now().toString().slice(-6)}`;
+        try {
+          fs.copyFileSync(backupPath, path.join(resourcesDir, archivedName));
+          log(`已归档旧版本 (${backupVersion}) 原版备份为: ${archivedName}`);
+        } catch (_) {}
+        fs.copyFileSync(asarPath, backupPath);
+        log(`检测到客户端已升级至 v${currentAsarVersion}，已同步更新安全备份: ${backupPath}`);
+      } else {
+        log('安全备份已存在且为官方原版，跳过备份。备份文件: ' + backupPath);
+      }
     }
   }
 
@@ -6854,10 +6867,13 @@ async function runLocalizationWorkflow(appDir, options = {}) {
     fs.rmSync(EXTRACT_DIR, { recursive: true, force: true });
   } catch (_) {}
 
-  // 7. Deploy newly packed app.asar
+  // 7. Deploy newly packed app.asar and sync local app.asar.ready
   log('正在部署新的汉化 app.asar...');
   try {
     fs.copyFileSync(tempAsar, asarPath);
+    try {
+      fs.copyFileSync(tempAsar, path.join(WORKSPACE_DIR, 'app.asar.ready'));
+    } catch (_) {}
     fs.unlinkSync(tempAsar);
     if (process.platform === 'darwin') {
       const appBundleMatch = appDir.match(/^.*\.app/);
@@ -6875,7 +6891,7 @@ async function runLocalizationWorkflow(appDir, options = {}) {
 }
 
 // Restore workflow
-function runRestoreWorkflow(appDir) {
+function runRestoreWorkflow(appDir, options = {}) {
   const resourcesDir = getResourcesDir(appDir);
   const asarPath = path.join(resourcesDir, 'app.asar');
   const backupPath = path.join(resourcesDir, 'app.asar.bak');
@@ -6889,11 +6905,19 @@ function runRestoreWorkflow(appDir) {
     throw new Error('检测到备份文件 `app.asar.bak` 本身已被汉化包污染，无法还原为官方原版！请重新安装官方安装包以恢复。');
   }
 
-  killApp();
+  if (!options.noKill && !process.argv.includes('--no-kill')) {
+    killApp();
+  }
 
   log('正在从安全备份恢复原始官方 app.asar...');
   try {
     fs.copyFileSync(backupPath, asarPath);
+    if (process.platform === 'darwin') {
+      const appBundleMatch = appDir.match(/^.*\.app/);
+      if (appBundleMatch) {
+        try { execFileSync('xattr', ['-cr', appBundleMatch[0]], { stdio: 'ignore' }); } catch (_) {}
+      }
+    }
     log('还原原始 app.asar 成功！软件已恢复为官方英文版。');
   } catch (e) {
     throw new Error('恢复文件失败: ' + e.message);
@@ -6921,7 +6945,8 @@ if (unknownCliFlags.length > 0) {
   process.exit(1);
 }
 
-const defaultAppDir = getAppDir(getHostUsername(), true, process.env.AGY_APP_DIR || '');
+const customAppDir = (process.env.AGY_APP_DIR || '').trim();
+const defaultAppDir = getAppDir(getHostUsername(), !customAppDir, customAppDir);
 
 if (process.argv.includes('--apply-only')) {
   try {

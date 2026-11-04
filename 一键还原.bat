@@ -12,8 +12,15 @@ echo =======================================================
 echo.
 
 where node >nul 2>nul
-if %ERRORLEVEL% equ 0 (
+if not errorlevel 1 (
     node "%CORE_DIR%\localize.js" --restore
+    if not errorlevel 1 (
+        if exist "%LOCALAPPDATA%\Programs\antigravity\Antigravity.exe" (
+            echo.
+            echo 正在重新启动 Antigravity...
+            start "" "%LOCALAPPDATA%\Programs\antigravity\Antigravity.exe"
+        )
+    )
     echo.
     pause
     exit /b
@@ -31,8 +38,13 @@ taskkill /F /IM Antigravity.exe >nul 2>nul
 taskkill /F /IM language_server.exe >nul 2>nul
 
 copy /Y "%TARGET_DIR%\app.asar.bak" "%TARGET_DIR%\app.asar" >nul
-if %ERRORLEVEL% equ 0 (
+if not errorlevel 1 (
     echo ✅ 已成功恢复为官方英文原版！
+    if exist "%LOCALAPPDATA%\Programs\antigravity\Antigravity.exe" (
+        echo.
+        echo 正在重新启动 Antigravity...
+        start "" "%LOCALAPPDATA%\Programs\antigravity\Antigravity.exe"
+    )
 ) else (
     echo [错误] 恢复文件失败，请右键以管理员身份运行此脚本。
 )

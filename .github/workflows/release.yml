@@ -26,7 +26,9 @@ jobs:
         run: |
           RAW_VER=$(node -p "require('./package.json').version")
           VERSION="v${RAW_VER#v}"
+          AGY_VER=$(node -p "require('./asar-version').readAsarPackageVersion('./app.asar.ready') || '2.28.2'")
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "agy_version=v${AGY_VER#v}" >> "$GITHUB_OUTPUT"
 
           MAC_PKG="Antigravity-ZH-CN-${VERSION}-macOS"
           WIN_PKG="Antigravity-ZH-CN-${VERSION}-Windows"
@@ -48,6 +50,7 @@ jobs:
             "一键汉化.command" \
             "一键还原.command" \
             README.md \
+            LICENSE \
             "release-assets/${MAC_PKG}/"
           chmod +x "release-assets/${MAC_PKG}/"*.command
 
@@ -65,7 +68,9 @@ jobs:
             "一键汉化.bat" \
             "一键还原.bat" \
             README.md \
+            LICENSE \
             "release-assets/${WIN_PKG}/"
+          sed -i 's/\r$//; s/$/\r/' "release-assets/${WIN_PKG}/"*.bat
 
           cd release-assets
           zip -rq "${MAC_PKG}.zip" "${MAC_PKG}"
@@ -76,7 +81,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.pkg.outputs.version }}
-          name: "${{ steps.pkg.outputs.version }} - Antigravity 一键深度汉化包（适配官方 v2.28.2）"
+          name: "${{ steps.pkg.outputs.version }} - Antigravity 一键深度汉化包（适配官方 ${{ steps.pkg.outputs.agy_version }}）"
           draft: false
           prerelease: false
           make_latest: "true"

@@ -12,9 +12,9 @@ echo =======================================================
 echo.
 
 where node >nul 2>nul
-if %ERRORLEVEL% equ 0 (
+if not errorlevel 1 (
     node "%CORE_DIR%\localize.js" --now
-    if %ERRORLEVEL% equ 0 (
+    if not errorlevel 1 (
         echo.
         echo 🎉 汉化已完成！正在启动 Antigravity...
         if exist "%LOCALAPPDATA%\Programs\antigravity\Antigravity.exe" (
@@ -54,7 +54,7 @@ if not exist "%TARGET_DIR%\app.asar.bak" (
 )
 
 copy /Y "%CORE_DIR%\app.asar.ready" "%TARGET_DIR%\app.asar" >nul
-if %ERRORLEVEL% equ 0 (
+if not errorlevel 1 (
     echo.
     echo 🎉 免环境一键汉化成功！正在启动 Antigravity...
     if exist "%LOCALAPPDATA%\Programs\antigravity\Antigravity.exe" (

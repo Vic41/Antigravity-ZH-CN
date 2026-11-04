@@ -4,6 +4,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 const { readAsarPackageVersion } = require('./asar-version');
 
 // 特征指纹检测：判断 asar 文件是否已经注入汉化代码
@@ -260,6 +261,12 @@ async function executeAutoRestore({
     }
     // 3. 原子重命名覆盖目标
     await fsp.rename(stagePath, asarPath);
+    if (process.platform === 'darwin') {
+      const appBundleMatch = String(appDir).match(/^.*\.app/);
+      if (appBundleMatch) {
+        try { execFileSync('xattr', ['-cr', appBundleMatch[0]], { stdio: 'ignore' }); } catch (_) {}
+      }
+    }
 
     return {
       success: true,

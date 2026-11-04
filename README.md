@@ -124,5 +124,5 @@ node localize.js --check-status
 
 ## 📄 开源协议与致谢
 
-- 本项目基于 [MIT License](./package.json) 许可。
+- 本项目基于 [MIT License](./LICENSE) 许可。
 - 灵感与部分词库架构致敬 [liominsb/Antigravity-Chinese-Localization](https://github.com/liominsb/Antigravity-Chinese-Localization)。

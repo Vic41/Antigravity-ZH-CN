@@ -8,7 +8,6 @@ const MAX_HEADER_BYTES = 4 * 1024 * 1024;
 const MAX_PACKAGE_BYTES = 1024 * 1024;
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-const comparable = value => process.platform === 'win32' ? value.toLowerCase() : value;
 
 function readExactly(fd, size, position) {
   const buffer = Buffer.alloc(size);
